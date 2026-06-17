@@ -24,4 +24,14 @@
 #define RESET_PIN     25
 #define RESET_HOLD_MS 5000
 
+// ── ESP-NOW Message Types ──────────────────────────────
+#define MSG_TELEMETRY   1
+#define MSG_COMMAND     2
+#define MSG_DISCOVERY   3
+#define MSG_SCAN_REQ    4
+#define MSG_PROVISION   5
+
+// ── Scan timeout (ms) ──────────────────────────────────
+#define SCAN_TIMEOUT_MS 30000
+
 #endif // CONFIG_HPP

@@ -1,9 +1,10 @@
 #include <Arduino.h>
-#include <WiFi.h>
-#include <WebServer.h>
 #include <DNSServer.h>
 #include <Preferences.h>
+#include <WebServer.h>
+#include <WiFi.h>
 #include <esp_now.h>
+
 #include "Config.hpp"
 
 // ── Packet ───────────────────────────────────────────────────────────────────
@@ -12,6 +13,14 @@ struct __attribute__((__packed__)) ESPNowMessage {
   uint8_t msgType;
   uint32_t deviceId;
   uint16_t value;
+  uint8_t checksum;
+};
+
+struct __attribute__((__packed__)) ESPNowProvisionMessage {
+  uint8_t header;
+  uint8_t msgType;
+  uint32_t deviceId;
+  char apiKey[33];
   uint8_t checksum;
 };
 
@@ -47,11 +56,24 @@ WiFiClient tcpClient;
 unsigned long lastTCPReconnect = 0;
 bool pendingReboot = false;
 
-// ── ESP-NOW Ring Buffer ──────────────────────────────────────────────────────
+// ── ESP-NOW Ring Buffer (variable-length)
+// ─────────────────────────────────────
 #define UPLINK_QUEUE_SIZE 32
-ESPNowMessage uplinkQueue[UPLINK_QUEUE_SIZE];
+#define MAX_MSG_SIZE 64
+
+struct UplinkMessage {
+  uint8_t data[MAX_MSG_SIZE];
+  int len;
+};
+
+UplinkMessage uplinkQueue[UPLINK_QUEUE_SIZE];
 volatile int uplinkHead = 0;
 volatile int uplinkTail = 0;
+
+// ── Scan state
+// ─────────────────────────────────────────────────────────────────
+bool scanning = false;
+unsigned long scanStartTime = 0;
 
 // ── Prototypes ───────────────────────────────────────────────────────────────
 void startAPMode();
@@ -69,10 +91,12 @@ void onESPNOWRecv(const uint8_t* mac, const uint8_t* data, int len);
 void initESPNOW();
 void handleESPNOW();
 void handleDownlink();
+void handleBBCommand(const String& cmd);
 bool tcpConnect();
 void tcpLoop();
 
-// ── Factory Reset via GPIO ─────────────────────────────────────────────────────
+// ── Factory Reset via GPIO
+// ─────────────────────────────────────────────────────
 void checkResetPin() {
   static unsigned long pressStart = 0;
   if (digitalRead(RESET_PIN) == LOW) {
@@ -105,13 +129,13 @@ void setup() {
 
   String savedSSID = prefs.getString(NVS_KEY_SSID, "");
   String savedPass = prefs.getString(NVS_KEY_PASS, "");
-  String savedKey  = prefs.getString(NVS_KEY_APIKEY, "");
+  String savedKey = prefs.getString(NVS_KEY_APIKEY, "");
 
   if (savedSSID.length() > 0 && savedKey.length() > 0) {
     Serial.println("Full config found — entering mesh mode");
     wifiSSID = savedSSID;
     wifiPass = savedPass;
-    apiKey   = savedKey;
+    apiKey = savedKey;
     currentState = STATE_CONNECTING;
     connectToWiFi(wifiSSID.c_str(), wifiPass.c_str());
   } else if (savedSSID.length() > 0) {
@@ -138,7 +162,8 @@ void loop() {
       break;
 
     case STATE_CONNECTING:
-      if (WiFi.status() == WL_CONNECTED && WiFi.localIP() != IPAddress(0, 0, 0, 0)) {
+      if (WiFi.status() == WL_CONNECTED &&
+          WiFi.localIP() != IPAddress(0, 0, 0, 0)) {
         Serial.print("WiFi connected. IP: ");
         Serial.println(WiFi.localIP());
         String key = prefs.getString(NVS_KEY_APIKEY, "");
@@ -175,6 +200,11 @@ void loop() {
       tcpLoop();
       handleESPNOW();
       handleDownlink();
+      // Scan timeout
+      if (scanning && millis() - scanStartTime > SCAN_TIMEOUT_MS) {
+        scanning = false;
+        Serial.println("Scan timed out");
+      }
       break;
   }
 }
@@ -286,7 +316,8 @@ body{background:#0d1117;color:#c9d1d9;font-family:sans-serif;display:flex;justif
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// LINKING MODE — WiFi connected, no API key → AP + embedded linking page + API proxy
+// LINKING MODE — WiFi connected, no API key → AP + embedded linking page + API
+// proxy
 // ══════════════════════════════════════════════════════════════════════════════
 void startLinkingMode() {
   currentState = STATE_LINKING;
@@ -307,7 +338,8 @@ void startLinkingMode() {
     if (httpServer.uri().startsWith("/api/")) {
       handleApiProxy();
     } else {
-      httpServer.sendHeader("Location", "http://" + WiFi.softAPIP().toString() + "/");
+      httpServer.sendHeader("Location",
+                            "http://" + WiFi.softAPIP().toString() + "/");
       httpServer.send(302, "text/html", "");
     }
   });
@@ -318,9 +350,11 @@ void startLinkingMode() {
   Serial.println("STA IP: " + WiFi.localIP().toString());
 }
 
-// Captive portal detection → redirect to linking page so the OS opens the captive portal browser.
+// Captive portal detection → redirect to linking page so the OS opens the
+// captive portal browser.
 void handleGen204() {
-  httpServer.sendHeader("Location", "http://" + WiFi.softAPIP().toString() + "/");
+  httpServer.sendHeader("Location",
+                        "http://" + WiFi.softAPIP().toString() + "/");
   httpServer.send(302, "text/html", "");
 }
 
@@ -569,7 +603,8 @@ void handleConfigure() {
   apiKey = newKey;
 
   httpServer.send(200, "application/json",
-    "{\"status\":\"configured\",\"message\":\"API key saved. Gateway will reboot.\"}");
+                  "{\"status\":\"configured\",\"message\":\"API key saved. "
+                  "Gateway will reboot.\"}");
 
   pendingReboot = true;
 }
@@ -597,10 +632,11 @@ void attemptReconnect() {
 // ESP-NOW
 // ══════════════════════════════════════════════════════════════════════════════
 void onESPNOWRecv(const uint8_t* mac, const uint8_t* data, int len) {
-  if (len != sizeof(ESPNowMessage)) return;
+  if (len < 1 || len > MAX_MSG_SIZE) return;
   int next = (uplinkHead + 1) % UPLINK_QUEUE_SIZE;
   if (next == uplinkTail) return;
-  memcpy((void*)&uplinkQueue[uplinkHead], data, sizeof(ESPNowMessage));
+  memcpy(uplinkQueue[uplinkHead].data, data, len);
+  uplinkQueue[uplinkHead].len = len;
   uplinkHead = next;
 }
 
@@ -620,20 +656,115 @@ void initESPNOW() {
 
 void handleESPNOW() {
   if (!tcpClient.connected()) return;
+
   while (uplinkTail != uplinkHead) {
-    tcpClient.write((uint8_t*)&uplinkQueue[uplinkTail], sizeof(ESPNowMessage));
+    UplinkMessage& msg = uplinkQueue[uplinkTail];
+
+    // Forward discovery packets (msgType=3) even to the hub for mesh relay
+    if (msg.len >= 2 && msg.data[1] == MSG_DISCOVERY) {
+      // Always forward discovery to the hub
+      tcpClient.write(msg.data, msg.len);
+
+      // If we're in scan mode, also rebroadcast to extend range
+      if (scanning) {
+        esp_now_send(broadcastMac, msg.data, msg.len);
+      }
+    } else if (msg.len >= 2 && msg.data[1] == MSG_SCAN_REQ) {
+      // Re-broadcast scan requests to extend range (mesh forwarding)
+      esp_now_send(broadcastMac, msg.data, msg.len);
+    } else {
+      // Normal telemetry or other messages → forward to hub
+      tcpClient.write(msg.data, msg.len);
+    }
+
     uplinkTail = (uplinkTail + 1) % UPLINK_QUEUE_SIZE;
   }
 }
 
 void handleDownlink() {
-  if (tcpClient.available() >= (int)sizeof(ESPNowMessage)) {
+  if (!tcpClient.available()) return;
+  int avail = tcpClient.available();
+
+  // Peek at the first byte to determine message type
+  int lead = tcpClient.peek();
+  if (lead < 0) return;
+
+  if (lead == 0xAA) {
+    // Standard 9-byte ESP-NOW downlink packet
+    if (avail < (int)sizeof(ESPNowMessage)) return;
+
     ESPNowMessage msg;
     tcpClient.readBytes((uint8_t*)&msg, sizeof(ESPNowMessage));
-    if (msg.header == 0xAA) {
-      esp_now_send(broadcastMac, (uint8_t*)&msg, sizeof(ESPNowMessage));
+
+    if (msg.header != 0xAA) return;
+
+    // Validate checksum
+    uint8_t calc = 0;
+    for (int i = 0; i < 8; i++) calc ^= ((uint8_t*)&msg)[i];
+    if (calc != msg.checksum) return;
+
+    switch (msg.msgType) {
+      case MSG_SCAN_REQ:
+        // Enter scan mode
+        scanning = true;
+        scanStartTime = millis();
+        Serial.println("Scan started by hub command");
+        // Re-broadcast scan request via ESP-NOW
+        esp_now_send(broadcastMac, (uint8_t*)&msg, sizeof(ESPNowMessage));
+        break;
+
+      case MSG_PROVISION: {
+        // Provision command — parse deviceId, send follow-up with API key
+        // The hub sends the full API key via BB: command, not via 9-byte packet
+        // So we just re-broadcast 9-byte provision signal
+        esp_now_send(broadcastMac, (uint8_t*)&msg, sizeof(ESPNowMessage));
+        break;
+      }
+
+      default:
+        // Regular command → re-broadcast
+        esp_now_send(broadcastMac, (uint8_t*)&msg, sizeof(ESPNowMessage));
+        break;
     }
+  } else if (lead == 0xBB) {
+    // Variable-length BB: command — read until newline
+    String cmd = tcpClient.readStringUntil('\n');
+    handleBBCommand(cmd);
   }
+}
+
+void handleBBCommand(const String& cmd) {
+  // Format: BB:<deviceId>:<apiKey>
+  int firstColon = cmd.indexOf(':');
+  if (firstColon < 0) return;
+  int secondColon = cmd.indexOf(':', firstColon + 1);
+  if (secondColon < 0) return;
+
+  String devIdStr = cmd.substring(firstColon + 1, secondColon);
+  String apiKey = cmd.substring(secondColon + 1);
+
+  uint32_t deviceId = (uint32_t)devIdStr.toInt();
+
+  Serial.printf("Provisioning node %u with API key\n", deviceId);
+
+  // Build and send ESP-NOW provision message with full API key
+  ESPNowProvisionMessage provMsg;
+  provMsg.header = 0xAA;
+  provMsg.msgType = MSG_PROVISION;
+  provMsg.deviceId = deviceId;
+  memset(provMsg.apiKey, 0, sizeof(provMsg.apiKey));
+  apiKey.toCharArray(provMsg.apiKey, sizeof(provMsg.apiKey) - 1);
+
+  // Compute checksum
+  uint8_t calc = 0;
+  for (int i = 0; i < (int)sizeof(ESPNowProvisionMessage) - 1; i++) {
+    calc ^= ((uint8_t*)&provMsg)[i];
+  }
+  provMsg.checksum = calc;
+
+  esp_now_send(broadcastMac, (uint8_t*)&provMsg,
+               sizeof(ESPNowProvisionMessage));
+  Serial.println("Provision message sent via ESP-NOW");
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
