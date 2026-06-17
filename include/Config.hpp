@@ -20,4 +20,8 @@
 #define WIFI_TIMEOUT_MS  30000
 #define TCP_RECONNECT_MS 5000
 
+// ── Factory Reset (GPIO 25 → GND for 5s) ──────────────
+#define RESET_PIN     25
+#define RESET_HOLD_MS 5000
+
 #endif // CONFIG_HPP

@@ -72,12 +72,34 @@ void handleDownlink();
 bool tcpConnect();
 void tcpLoop();
 
+// ── Factory Reset via GPIO ─────────────────────────────────────────────────────
+void checkResetPin() {
+  static unsigned long pressStart = 0;
+  if (digitalRead(RESET_PIN) == LOW) {
+    if (pressStart == 0) {
+      pressStart = millis();
+    } else if (millis() - pressStart >= RESET_HOLD_MS) {
+      Serial.println("Factory reset via GPIO " + String(RESET_PIN));
+      prefs.remove(NVS_KEY_SSID);
+      prefs.remove(NVS_KEY_PASS);
+      prefs.remove(NVS_KEY_APIKEY);
+      prefs.end();
+      delay(500);
+      ESP.restart();
+    }
+  } else {
+    pressStart = 0;
+  }
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // SETUP
 // ══════════════════════════════════════════════════════════════════════════════
 void setup() {
   Serial.begin(115200);
   delay(300);
+
+  pinMode(RESET_PIN, INPUT_PULLUP);
 
   prefs.begin(NVS_NAMESPACE, false);
 
@@ -108,6 +130,7 @@ void setup() {
 // LOOP
 // ══════════════════════════════════════════════════════════════════════════════
 void loop() {
+  checkResetPin();
   switch (currentState) {
     case STATE_AP_SETUP:
       dnsServer.processNextRequest();
@@ -179,6 +202,10 @@ void startAPMode() {
 }
 
 void handleCaptivePortal() {
+  if (currentState == STATE_LINKING) {
+    handleLinkingPage();
+    return;
+  }
   String html = R"rawliteral(
 <!DOCTYPE html>
 <html lang="en">
@@ -196,6 +223,10 @@ input{width:100%;padding:0.6rem 0.75rem;border:1px solid #30363d;border-radius:8
 input:focus{outline:none;border-color:#58a6ff}
 button{width:100%;padding:0.7rem;background:#238636;color:#fff;border:none;border-radius:8px;font-size:1rem;font-weight:600;cursor:pointer}
 button:hover{background:#2ea043}
+.pw-wrap{position:relative}
+.pw-wrap input{padding-right:3.2rem;margin-bottom:0}
+.pw-toggle{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;color:#8b949e;cursor:pointer;font-size:.75rem;padding:4px 6px;width:auto;line-height:1;font-family:inherit;font-weight:500}
+.pw-toggle:hover{color:#c9d1d9}
 </style>
 </head>
 <body>
@@ -206,10 +237,14 @@ button:hover{background:#2ea043}
 <label for="ssid">WiFi Name (SSID)</label>
 <input id="ssid" name="ssid" required placeholder="Network name">
 <label for="password">Password</label>
-<input id="password" name="password" type="password" placeholder="Network password">
-<button type="submit" id="btn">Connect</button>
+<div class="pw-wrap">
+<input id="wifi-pass" name="password" type="password" placeholder="Network password">
+<button type="button" class="pw-toggle" onclick="togglePw('wifi-pass',this)">Show</button>
+</div>
+<button type="submit" id="btn" style="margin-top:1rem">Connect</button>
 </form>
 </div>
+<script>function togglePw(id,btn){const i=document.getElementById(id);if(i.type==='password'){i.type='text';btn.textContent='Hide'}else{i.type='password';btn.textContent='Show'}}</script>
 </body>
 </html>
 )rawliteral";
@@ -272,7 +307,8 @@ void startLinkingMode() {
     if (httpServer.uri().startsWith("/api/")) {
       handleApiProxy();
     } else {
-      handleGen204();
+      httpServer.sendHeader("Location", "http://" + WiFi.softAPIP().toString() + "/");
+      httpServer.send(302, "text/html", "");
     }
   });
   httpServer.begin();
@@ -282,10 +318,10 @@ void startLinkingMode() {
   Serial.println("STA IP: " + WiFi.localIP().toString());
 }
 
-// Captive portal detection → 204 No Content tells the OS there's no portal,
-// so the OS won't interfere. The user manually opens the page.
+// Captive portal detection → redirect to linking page so the OS opens the captive portal browser.
 void handleGen204() {
-  httpServer.send(204, "text/plain", "");
+  httpServer.sendHeader("Location", "http://" + WiFi.softAPIP().toString() + "/");
+  httpServer.send(302, "text/html", "");
 }
 
 void handleApiProxy() {
@@ -353,33 +389,37 @@ void handleLinkingPage() {
 <title>SmartHome — Link Gateway</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f6f8fa;color:#1f2328;display:flex;justify-content:center;padding-top:2rem;min-height:100vh;-webkit-font-smoothing:antialiased}
-.card{background:#fff;border:1px solid #d0d7de;border-radius:12px;padding:2rem;width:100%;max-width:400px;margin:1rem;box-shadow:0 1px 3px rgba(0,0,0,.04)}
-h1{font-size:1.3rem;font-weight:700;margin-bottom:.25rem}
-p{color:#656d76;font-size:.88rem;margin-bottom:1.25rem;line-height:1.5}
-label{display:block;font-size:.82rem;font-weight:600;margin-bottom:.25rem;color:#1f2328}
-input{width:100%;padding:.6rem .7rem;border:1px solid #d0d7de;border-radius:8px;font-size:.9rem;margin-bottom:.85rem;transition:border-color .2s}
-input:focus{outline:none;border-color:#0969da;box-shadow:0 0 0 3px rgba(9,105,218,.1)}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0d1117;color:#c9d1d9;display:flex;justify-content:center;align-items:center;padding:1.5rem;min-height:100vh;-webkit-font-smoothing:antialiased}
+.card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:2rem;width:100%;max-width:400px;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+h1{color:#58a6ff;font-size:1.3rem;font-weight:700;margin-bottom:.25rem}
+p{color:#8b949e;font-size:.88rem;margin-bottom:1.25rem;line-height:1.5}
+label{display:block;font-size:.82rem;font-weight:600;margin-bottom:.25rem;color:#c9d1d9}
+input{width:100%;padding:.6rem .75rem;border:1px solid #30363d;border-radius:8px;background:#0d1117;color:#c9d1d9;font-size:.9rem;margin-bottom:.85rem;transition:border-color .2s;box-sizing:border-box}
+input:focus{outline:none;border-color:#58a6ff;box-shadow:0 0 0 3px rgba(88,166,255,.15)}
 button{width:100%;padding:.65rem;border:none;border-radius:8px;font-size:.9rem;font-weight:600;cursor:pointer;transition:background .2s;font-family:inherit}
-.btn-primary{background:#0969da;color:#fff;margin-top:.25rem}
-.btn-primary:hover{background:#0860ca}
+.btn-primary{background:#238636;color:#fff;margin-top:1rem}
+.btn-primary:hover{background:#2ea043}
 .btn-primary:disabled{opacity:.6;cursor:default}
-.btn-secondary{background:transparent;border:1px solid #d0d7de;color:#1f2328;margin-top:.5rem}
-.btn-secondary:hover{background:#f3f4f6}
-.error{color:#bc1c1b;font-size:.82rem;margin-bottom:.5rem}
+.btn-secondary{background:transparent;border:1px solid #30363d;color:#c9d1d9;margin-top:.5rem}
+.btn-secondary:hover{background:#1c2128}
+.error{color:#f85149;font-size:.82rem;margin-bottom:.5rem}
+.pw-wrap{position:relative}
+.pw-wrap input{padding-right:3.2rem;margin-bottom:0}
+.pw-toggle{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;color:#8b949e;cursor:pointer;font-size:.75rem;padding:4px 6px;width:auto;line-height:1;font-family:inherit;font-weight:500}
+.pw-toggle:hover{color:#c9d1d9}
 .gw-list{display:flex;flex-direction:column;gap:.5rem}
-.gw-opt{display:flex;justify-content:space-between;align-items:center;padding:.65rem .85rem;border:1px solid #d0d7de;border-radius:8px;background:#fafafa;cursor:pointer;font-size:.85rem;text-align:left;width:100%;transition:border-color .2s}
-.gw-opt:hover{border-color:#0969da;background:#f0f6ff}
-.gw-opt strong{color:#0969da}
-.gw-opt code{font-size:.7rem;color:#656d76;background:#f3f4f6;padding:.1rem .35rem;border-radius:4px}
+.gw-opt{display:flex;justify-content:space-between;align-items:center;padding:.65rem .85rem;border:1px solid #30363d;border-radius:8px;background:#0d1117;cursor:pointer;font-size:.85rem;text-align:left;width:100%;transition:border-color .2s}
+.gw-opt:hover{border-color:#58a6ff;background:#1c2128}
+.gw-opt strong{color:#58a6ff}
+.gw-opt code{font-size:.7rem;color:#8b949e;background:#161b22;padding:.1rem .35rem;border-radius:4px}
 .empty{text-align:center;padding:1rem 0}
-.empty p{color:#656d76;margin-bottom:.5rem}
-.empty a{color:#0969da;font-weight:600}
-.done-icon{font-size:2rem;text-align:center;margin-bottom:.5rem;color:#116329}
-.key-box{background:#f6f8fa;border:1px solid #d0d7de;border-radius:6px;padding:.6rem;font-family:monospace;font-size:.78rem;word-break:break-all;text-align:center;margin-bottom:0}
-.spinner{border:3px solid #eee;border-top:3px solid #0969da;border-radius:50%;width:28px;height:28px;animation:spin .8s linear infinite;margin:1rem auto}
+.empty p{color:#8b949e;margin-bottom:.5rem}
+.done-icon{font-size:2rem;text-align:center;margin-bottom:.5rem;color:#3fb950}
+.key-box{background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:.6rem;font-family:monospace;font-size:.78rem;word-break:break-all;text-align:center;margin-bottom:0}
+.spinner{border:3px solid #30363d;border-top:3px solid #58a6ff;border-radius:50%;width:28px;height:28px;animation:spin .8s linear infinite;margin:1rem auto}
 @keyframes spin{to{transform:rotate(360deg)}}
 .hidden{display:none}
+.form-group{margin-bottom:.85rem}
 </style>
 </head>
 <body>
@@ -391,7 +431,10 @@ button{width:100%;padding:.65rem;border:none;border-radius:8px;font-size:.9rem;f
       <label for="email">Email</label>
       <input id="email" type="email" required placeholder="you@example.com">
       <label for="password">Password</label>
-      <input id="password" type="password" required placeholder="Password">
+      <div class="pw-wrap">
+        <input id="password" type="password" required placeholder="Password">
+        <button type="button" class="pw-toggle" onclick="togglePw('password',this)">Show</button>
+      </div>
       <p class="error hidden" id="login-err"></p>
       <button type="submit" class="btn-primary" id="login-btn">Sign In</button>
     </form>
@@ -431,6 +474,7 @@ button{width:100%;padding:.65rem;border:none;border-radius:8px;font-size:.9rem;f
 <script>
 let TOKEN = '';
 function $(id){return document.getElementById(id)}
+function togglePw(id,btn){const i=$(id);if(i.type==='password'){i.type='text';btn.textContent='Hide'}else{i.type='password';btn.textContent='Show'}}
 function showStep(s){['login','select','saving','done','error'].forEach(id=>$('step-'+id).classList.toggle('hidden',id!==s))}
 async function api(method,path,body){
   const opts={method,headers:{'Content-Type':'application/json'}}
