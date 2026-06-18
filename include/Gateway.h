@@ -24,6 +24,7 @@ struct __attribute__((__packed__)) ESPNowProvisionMessage {
   uint8_t msgType;
   uint32_t deviceId;
   char apiKey[33];
+  char gatewayId[17];
   uint8_t checksum;
 };
 

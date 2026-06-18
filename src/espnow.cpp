@@ -128,17 +128,22 @@ void handleDownlink() {
 }
 
 void handleBBCommand(const String& cmd) {
+  // Format: BB:deviceId:apiKey:gatewayId:deviceType
   int firstColon = cmd.indexOf(':');
   if (firstColon < 0) return;
   int secondColon = cmd.indexOf(':', firstColon + 1);
   if (secondColon < 0) return;
+  int thirdColon = cmd.indexOf(':', secondColon + 1);
+  if (thirdColon < 0) return;
+  int fourthColon = cmd.indexOf(':', thirdColon + 1);
 
   String devIdStr = cmd.substring(firstColon + 1, secondColon);
-  String apiKeyStr = cmd.substring(secondColon + 1);
+  String apiKeyStr = cmd.substring(secondColon + 1, thirdColon);
+  String gatewayIdStr = cmd.substring(thirdColon + 1, fourthColon > 0 ? fourthColon : cmd.length());
 
   uint32_t deviceId = (uint32_t)devIdStr.toInt();
 
-  Serial.printf("BB: Provisioning node %u with API key\n", deviceId);
+  Serial.printf("BB: Provisioning node %u gateway=%s\n", deviceId, gatewayIdStr.c_str());
 
   ESPNowProvisionMessage provMsg;
   provMsg.header = 0xAA;
@@ -146,6 +151,8 @@ void handleBBCommand(const String& cmd) {
   provMsg.deviceId = deviceId;
   memset(provMsg.apiKey, 0, sizeof(provMsg.apiKey));
   apiKeyStr.toCharArray(provMsg.apiKey, sizeof(provMsg.apiKey) - 1);
+  memset(provMsg.gatewayId, 0, sizeof(provMsg.gatewayId));
+  gatewayIdStr.toCharArray(provMsg.gatewayId, sizeof(provMsg.gatewayId) - 1);
 
   uint8_t calc = 0;
   for (int i = 0; i < (int)sizeof(ESPNowProvisionMessage) - 1; i++) {
