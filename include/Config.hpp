@@ -34,6 +34,11 @@
 // ── Scan timeout (ms) ──────────────────────────────────
 #define SCAN_TIMEOUT_MS 30000
 
+// ── mDNS ─────────────────────────────────────────────
+#define MDNS_NAME "smarthome-gw"
+#define MDNS_SERVICE "_http"
+#define MDNS_PROTO   "_tcp"
+
 // ── Local REST API ────────────────────────────────────
 #define LOCAL_API_PORT 80
 #define NODE_OFFLINE_MS 300000      // 5 min before local node shows offline

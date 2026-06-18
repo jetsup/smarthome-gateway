@@ -101,6 +101,15 @@ void loop() {
           WiFi.localIP() != IPAddress(0, 0, 0, 0)) {
         Serial.print("WiFi connected. IP: ");
         Serial.println(WiFi.localIP());
+        // Start mDNS with unique hostname (last 4 hex of MAC)
+        String macStr = WiFi.macAddress();
+        macStr.replace(":", "");
+        String mdnsHost = String(MDNS_NAME) + "-" + macStr.substring(macStr.length() - 4);
+        if (MDNS.begin(mdnsHost.c_str())) {
+          MDNS.addService(MDNS_SERVICE, MDNS_PROTO, LOCAL_API_PORT);
+          MDNS.addServiceTxt(MDNS_SERVICE, MDNS_PROTO, "id", macStr.substring(macStr.length() - 8));
+          Serial.printf("mDNS started: %s.local\n", mdnsHost.c_str());
+        }
         String key = prefs.getString(NVS_KEY_APIKEY, "");
         if (key.length() > 0) {
           apiKey = key;

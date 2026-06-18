@@ -261,7 +261,12 @@ static void handleApiStatus(AsyncWebServerRequest* req) {
   int nCount = localNodeCount;
   int qDepth = opQueueCount;
   if (dataMutex) xSemaphoreGive(dataMutex);
+  String macStr = WiFi.macAddress();
+  macStr.replace(":", "");
+  String mdnsHost = String(MDNS_NAME) + "-" + macStr.substring(macStr.length() - 4);
   String json = "{\"gatewayId\":\"" + String(prefs.getString("gateway_id", "")) +
+                "\",\"mac\":\"" + WiFi.macAddress() +
+                "\",\"mdns\":\"" + mdnsHost + ".local" +
                 "\",\"state\":\"" + String(currentState == STATE_MESH ? "mesh" :
                    currentState == STATE_LINKING ? "linking" :
                    currentState == STATE_CONNECTING ? "connecting" : "setup") +
