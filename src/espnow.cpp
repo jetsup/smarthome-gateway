@@ -38,8 +38,6 @@ void initESPNOW() {
 }
 
 void handleESPNOW() {
-  if (!tcpClient.connected()) return;
-
   while (uplinkTail != uplinkHead) {
     UplinkMessage& msg = uplinkQueue[uplinkTail];
 
@@ -50,23 +48,34 @@ void handleESPNOW() {
                  ((uint32_t)msg.data[4] << 16) | ((uint32_t)msg.data[5] << 24);
     }
 
-    // Forward discovery packets (msgType=3) even to the hub for mesh relay
-    if (msg.len >= 2 && msg.data[1] == MSG_DISCOVERY) {
-      tcpClient.write(msg.data, msg.len);
-      Serial.printf("Uplink: deviceId=%u msgType=%u len=%d (discovery)\n",
-                    deviceId, msgType, msg.len);
+    // Update local node registry (with mutex for thread safety)
+    uint16_t val = (msg.len >= 8) ? ((uint16_t)msg.data[6] | ((uint16_t)msg.data[7] << 8)) : 0;
+    if (msgType == MSG_TELEMETRY || msgType == MSG_DISCOVERY) {
+      uint8_t devType = (msgType == MSG_DISCOVERY) ? (uint8_t)val : 0;
+      if (dataMutex) xSemaphoreTake(dataMutex, portMAX_DELAY);
+      addOrUpdateLocalNode(deviceId, devType, val);
+      if (dataMutex) xSemaphoreGive(dataMutex);
+    }
 
-      if (scanning) {
+    // Forward to hub if connected
+    if (tcpClient.connected()) {
+      if (msgType == MSG_DISCOVERY) {
+        tcpClient.write(msg.data, msg.len);
+        Serial.printf("Uplink: deviceId=%u msgType=%u len=%d (discovery)\n",
+                      deviceId, msgType, msg.len);
+
+        if (scanning) {
+          esp_now_send(broadcastMac, msg.data, msg.len);
+        }
+      } else if (msgType == MSG_SCAN_REQ) {
         esp_now_send(broadcastMac, msg.data, msg.len);
+        Serial.printf("Uplink: deviceId=%u msgType=%u len=%d (scan rebroadcast)\n",
+                      deviceId, msgType, msg.len);
+      } else {
+        tcpClient.write(msg.data, msg.len);
+        Serial.printf("Uplink: deviceId=%u msgType=%u len=%d\n", deviceId,
+                      msgType, msg.len);
       }
-    } else if (msg.len >= 2 && msg.data[1] == MSG_SCAN_REQ) {
-      esp_now_send(broadcastMac, msg.data, msg.len);
-      Serial.printf("Uplink: deviceId=%u msgType=%u len=%d (scan rebroadcast)\n",
-                    deviceId, msgType, msg.len);
-    } else {
-      tcpClient.write(msg.data, msg.len);
-      Serial.printf("Uplink: deviceId=%u msgType=%u len=%d\n", deviceId,
-                    msgType, msg.len);
     }
 
     uplinkTail = (uplinkTail + 1) % UPLINK_QUEUE_SIZE;

@@ -34,4 +34,14 @@
 // ── Scan timeout (ms) ──────────────────────────────────
 #define SCAN_TIMEOUT_MS 30000
 
+// ── Local REST API ────────────────────────────────────
+#define LOCAL_API_PORT 80
+#define NODE_OFFLINE_MS 300000      // 5 min before local node shows offline
+#define QUEUE_FLUSH_INTERVAL 10000    // ms between queue flush attempts
+#define QUEUE_NVS_KEY    "op_queue"
+
+// ── Offline queue operation types ─────────────────────
+#define OP_PROVISION   "provision"
+#define OP_DISCONNECT  "disconnect"
+
 #endif // CONFIG_HPP

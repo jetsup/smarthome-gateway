@@ -7,7 +7,7 @@ unsigned long stateTimer = 0;
 
 Preferences prefs;
 
-WebServer httpServer(80);
+AsyncWebServer asyncServer(LOCAL_API_PORT);
 DNSServer dnsServer;
 
 String wifiSSID = "";
@@ -25,6 +25,8 @@ volatile int uplinkTail = 0;
 
 bool scanning = false;
 unsigned long scanStartTime = 0;
+
+SemaphoreHandle_t dataMutex = nullptr;
 
 void checkResetPin() {
   static unsigned long pressStart = 0;
@@ -51,6 +53,18 @@ void setup() {
 
   pinMode(RESET_PIN, INPUT_PULLUP);
   prefs.begin(NVS_NAMESPACE, false);
+
+  // Create mutex for shared data access (web server + main loop)
+  dataMutex = xSemaphoreCreateMutex();
+
+  // Load offline operation queue
+  loadQueue();
+
+  // Initialize WiFi stack early so asyncServer.begin() doesn't crash
+  WiFi.mode(WIFI_AP_STA);
+
+  // Start web server once (handles all states)
+  initWebServer();
 
   String savedSSID = prefs.getString(NVS_KEY_SSID, "");
   String savedPass = prefs.getString(NVS_KEY_PASS, "");
@@ -80,7 +94,6 @@ void loop() {
   switch (currentState) {
     case STATE_AP_SETUP:
       dnsServer.processNextRequest();
-      httpServer.handleClient();
       break;
 
     case STATE_CONNECTING:
@@ -105,7 +118,6 @@ void loop() {
 
     case STATE_LINKING:
       dnsServer.processNextRequest();
-      httpServer.handleClient();
       if (pendingReboot) {
         delay(500);
         dnsServer.stop();
@@ -124,6 +136,9 @@ void loop() {
         scanning = false;
         Serial.println("Scan timed out");
       }
+
+      // Periodically flush offline operation queue
+      tryFlushQueue();
       break;
   }
 }

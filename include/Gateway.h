@@ -2,9 +2,10 @@
 #define GATEWAY_H
 
 #include <Arduino.h>
+#include <AsyncTCP.h>
 #include <DNSServer.h>
+#include <ESPAsyncWebServer.h>
 #include <Preferences.h>
-#include <WebServer.h>
 #include <WiFi.h>
 #include <esp_now.h>
 
@@ -44,7 +45,7 @@ extern unsigned long stateTimer;
 extern Preferences prefs;
 
 // ── Servers ──────────────────────────────────────────────────────────────────
-extern WebServer httpServer;
+extern AsyncWebServer asyncServer;
 extern DNSServer dnsServer;
 
 // ── Credentials ──────────────────────────────────────────────────────────────
@@ -76,17 +77,53 @@ extern volatile int uplinkTail;
 extern bool scanning;
 extern unsigned long scanStartTime;
 
+// ── Local node registry ──────────────────────────────────────────────────────
+struct LocalNode {
+  uint32_t deviceId;
+  uint8_t deviceType;
+  uint16_t lastValue;
+  unsigned long lastSeen;
+  bool isOnline() const {
+    return (millis() - lastSeen) <= NODE_OFFLINE_MS;
+  }
+};
+
+// Simple array-based registry (max 64 nodes, no dynamic alloc)
+#define MAX_LOCAL_NODES 64
+extern LocalNode localNodes[MAX_LOCAL_NODES];
+extern int localNodeCount;
+
+int findLocalNode(uint32_t deviceId);
+int addOrUpdateLocalNode(uint32_t deviceId, uint8_t deviceType, uint16_t value);
+
+// ── Offline operation queue ──────────────────────────────────────────────────
+#define MAX_QUEUE_ENTRIES 32
+
+struct QueueEntry {
+  char type[16];
+  uint32_t deviceId;
+  char apiKey[33];
+};
+
+extern QueueEntry opQueue[MAX_QUEUE_ENTRIES];
+extern int opQueueCount;
+
+extern SemaphoreHandle_t dataMutex;
+
+void loadQueue();
+void saveQueue();
+void enqueueOperation(const char* type, uint32_t deviceId, const char* apiKey);
+int flushQueue();
+void tryFlushQueue();
+
+// ── Web server ───────────────────────────────────────────────────────────────
+void initWebServer();
+
 // ── Function declarations ────────────────────────────────────────────────────
 void startAPMode();
 void startLinkingMode();
 void connectToWiFi(const char* ssid, const char* pass);
 void attemptReconnect();
-void handleCaptivePortal();
-void handleWiFiConfig();
-void handleGen204();
-void handleApiProxy();
-void handleLinkingPage();
-void handleConfigure();
 void onESPNOWRecv(const uint8_t* mac, const uint8_t* data, int len);
 void initESPNOW();
 void handleESPNOW();
