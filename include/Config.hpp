@@ -11,6 +11,11 @@
 #define NVS_KEY_SSID   "wifi_ssid"
 #define NVS_KEY_PASS   "wifi_pass"
 #define NVS_KEY_APIKEY "api_key"
+#define NVS_WIFI_COUNT "wifi_count"        // number of saved credentials
+#define NVS_WIFI_SSID_PREFIX "w_s_"        // + index = "w_s_0", "w_s_1" ...
+#define NVS_WIFI_PASS_PREFIX "w_p_"        // + index = "w_p_0", "w_p_1" ...
+
+#define MAX_SAVED_WIFI 8
 
 // ── Captive Portal ─────────────────────────────────────
 #define AP_SSID_SETUP "SmartHome-Setup"

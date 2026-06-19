@@ -66,26 +66,43 @@ void setup() {
   // Start web server once (handles all states)
   initWebServer();
 
-  String savedSSID = prefs.getString(NVS_KEY_SSID, "");
-  String savedPass = prefs.getString(NVS_KEY_PASS, "");
   String savedKey = prefs.getString(NVS_KEY_APIKEY, "");
 
-  if (savedSSID.length() > 0 && savedKey.length() > 0) {
-    Serial.println("Full config found — entering mesh mode");
-    wifiSSID = savedSSID;
-    wifiPass = savedPass;
+  // Try multi-SSID scan-and-connect first
+  int savedWifiCount = getSavedWifiCount();
+  bool connected = false;
+  if (savedWifiCount > 0) {
+    connected = scanAndConnect();
+  }
+
+  if (connected && savedKey.length() > 0) {
+    Serial.println("Connected with multi-SSID — entering mesh mode");
     apiKey = savedKey;
     currentState = STATE_CONNECTING;
-    connectToWiFi(wifiSSID.c_str(), wifiPass.c_str());
-  } else if (savedSSID.length() > 0) {
-    Serial.println("WiFi saved but no API key — entering linking mode");
-    wifiSSID = savedSSID;
-    wifiPass = savedPass;
+  } else if (connected) {
+    Serial.println("Connected but no API key — entering linking mode");
     currentState = STATE_CONNECTING;
-    connectToWiFi(wifiSSID.c_str(), wifiPass.c_str());
   } else {
-    Serial.println("No config — starting captive portal");
-    startAPMode();
+    // Fallback: single SSID from old NVS key
+    String savedSSID = prefs.getString(NVS_KEY_SSID, "");
+    String savedPass = prefs.getString(NVS_KEY_PASS, "");
+    if (savedSSID.length() > 0 && savedKey.length() > 0) {
+      Serial.println("Full config found — entering mesh mode");
+      wifiSSID = savedSSID;
+      wifiPass = savedPass;
+      apiKey = savedKey;
+      currentState = STATE_CONNECTING;
+      connectToWiFi(wifiSSID.c_str(), wifiPass.c_str());
+    } else if (savedSSID.length() > 0) {
+      Serial.println("WiFi saved but no API key — entering linking mode");
+      wifiSSID = savedSSID;
+      wifiPass = savedPass;
+      currentState = STATE_CONNECTING;
+      connectToWiFi(wifiSSID.c_str(), wifiPass.c_str());
+    } else {
+      Serial.println("No config — starting captive portal");
+      startAPMode();
+    }
   }
 }
 

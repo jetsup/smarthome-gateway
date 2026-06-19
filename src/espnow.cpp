@@ -129,6 +129,13 @@ void handleDownlink() {
     } else {
       Serial.printf("Unknown TCP data: %s\n", cmd.c_str());
     }
+  } else if (lead == 'W') {
+    String cmd = tcpClient.readStringUntil('\n');
+    if (cmd.startsWith("WIFI:")) {
+      handleWifiCommand(cmd);
+    } else {
+      Serial.printf("Unknown TCP data (W): %s\n", cmd.c_str());
+    }
   } else {
     String unknown = tcpClient.readStringUntil('\n');
     Serial.printf("Unknown TCP data (lead=0x%02x): %s\n", lead,
@@ -175,4 +182,33 @@ void handleBBCommand(const String& cmd) {
   Serial.printf("BB: ESP-NOW send result: %d\n", result);
 
   tcpClient.printf("ACK:provision:%u\n", deviceId);
+}
+
+void handleWifiCommand(const String& cmd) {
+  // Format: WIFI:ssid:password
+  int firstColon = cmd.indexOf(':');
+  if (firstColon < 0) return;
+  int secondColon = cmd.indexOf(':', firstColon + 1);
+  if (secondColon < 0) return;
+
+  String ssid = cmd.substring(firstColon + 1, secondColon);
+  String password = cmd.substring(secondColon + 1);
+  password.trim();
+
+  Serial.printf("WIFI: Configuring network SSID=%s len(pass)=%d\n",
+                ssid.c_str(), password.length());
+
+  // Save to credential list
+  saveWifiCredential(ssid, password);
+
+  // Also save as active SSID/pass for backward compat
+  prefs.putString(NVS_KEY_SSID, ssid);
+  prefs.putString(NVS_KEY_PASS, password);
+
+  // Connect immediately
+  wifiSSID = ssid;
+  wifiPass = password;
+  connectToWiFi(wifiSSID.c_str(), wifiPass.c_str());
+
+  tcpClient.printf("ACK:wifi:%s\n", ssid.c_str());
 }

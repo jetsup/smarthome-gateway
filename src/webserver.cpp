@@ -599,6 +599,9 @@ void handleWiFiConfig(AsyncWebServerRequest* req) {
   addCORS(resp);
   req->send(resp);
 
+  // Save to multi-SSID credential list
+  saveWifiCredential(wifiSSID, wifiPass);
+
   prefs.putString(NVS_KEY_SSID, wifiSSID);
   prefs.putString(NVS_KEY_PASS, wifiPass);
 
@@ -708,6 +711,114 @@ void handleApiProxy(AsyncWebServerRequest* req) {
   req->send(resp);
 }
 
+// ── Handler: POST /api/wifi/configure (save WiFi credentials) ────────────────
+static void handleApiWifiConfigure(AsyncWebServerRequest* req) {
+  if (req->contentLength() == 0) {
+    sendError(req, 400, "Missing body");
+    return;
+  }
+
+  String body = req->arg("plain");
+
+  int sPos = body.indexOf("\"ssid\"");
+  if (sPos < 0) {
+    sendError(req, 400, "Missing ssid");
+    return;
+  }
+  int colon = body.indexOf(':', sPos);
+  int qs = body.indexOf('"', colon + 1);
+  int qe = body.indexOf('"', qs + 1);
+  if (qs < 0 || qe <= qs) {
+    sendError(req, 400, "Bad JSON ssid");
+    return;
+  }
+  String ssid = body.substring(qs + 1, qe);
+
+  String password;
+  int pPos = body.indexOf("\"password\"");
+  if (pPos >= 0) {
+    colon = body.indexOf(':', pPos);
+    qs = body.indexOf('"', colon + 1);
+    qe = body.indexOf('"', qs + 1);
+    if (qs >= 0 && qe > qs) {
+      password = body.substring(qs + 1, qe);
+    }
+  }
+
+  Serial.printf("WiFi configure via API: SSID=%s\n", ssid.c_str());
+
+  // Save to credential list
+  saveWifiCredential(ssid, password);
+
+  // Also save as active for backward compat
+  prefs.putString(NVS_KEY_SSID, ssid);
+  prefs.putString(NVS_KEY_PASS, password);
+
+  wifiSSID = ssid;
+  wifiPass = password;
+
+  sendJSON(req, 200, "{\"status\":\"saved\",\"ssid\":\"" + ssid + "\"}");
+
+  // Connect immediately
+  connectToWiFi(wifiSSID.c_str(), wifiPass.c_str());
+}
+
+// ── Handler: GET /api/wifi/networks (scan available networks) ─────────────────
+static void handleApiWifiNetworks(AsyncWebServerRequest* req) {
+  int networks = WiFi.scanComplete();
+  if (networks == WIFI_SCAN_FAILED || networks == WIFI_SCAN_RUNNING) {
+    // Start a new scan
+    WiFi.scanNetworks(true);
+    sendJSON(req, 200, "{\"status\":\"scanning\"}");
+    return;
+  }
+
+  // Build known SSID set for isKnown check
+  String knownSSIDs[MAX_SAVED_WIFI];
+  int savedCount = getSavedWifiCount();
+  for (int i = 0; i < savedCount; i++) {
+    String pass;
+    getSavedWifi(i, knownSSIDs[i], pass);
+  }
+
+  String json = "[";
+  for (int i = 0; i < networks; i++) {
+    if (i > 0) json += ',';
+    String ssid = WiFi.SSID(i);
+    bool isKnown = false;
+    for (int k = 0; k < savedCount; k++) {
+      if (ssid == knownSSIDs[k]) { isKnown = true; break; }
+    }
+    json += "{\"ssid\":\"" + ssid +
+            "\",\"rssi\":" + String(WiFi.RSSI(i)) +
+            ",\"encrypted\":" + (WiFi.encryptionType(i) != WIFI_AUTH_OPEN ? "true" : "false") +
+            ",\"known\":" + (isKnown ? "true" : "false") +
+            "}";
+  }
+  json += "]";
+
+  WiFi.scanDelete();
+  sendJSON(req, 200, json);
+}
+
+// ── Handler: GET /api/wifi/credentials (list saved credentials, passwords masked) ──
+static void handleApiWifiCredentials(AsyncWebServerRequest* req) {
+  int count = getSavedWifiCount();
+  String json = "[";
+  for (int i = 0; i < count; i++) {
+    if (i > 0) json += ',';
+    String ssid, pass;
+    getSavedWifi(i, ssid, pass);
+    String masked = pass.length() > 0 ? String(pass[0]) + "…" + String(pass[pass.length() > 1 ? pass.length() - 1 : 0]) : "";
+    json += "{\"index\":" + String(i) +
+            ",\"ssid\":\"" + ssid +
+            "\",\"password\":\"" + masked +
+            "\"}";
+  }
+  json += "]";
+  sendJSON(req, 200, json);
+}
+
 // ── Handler: Not found (captive portal + fallback) ───────────────────────────
 void handleNotFound(AsyncWebServerRequest* req) {
   // For OPTIONS (CORS preflight), respond OK
@@ -743,6 +854,9 @@ void initWebServer() {
   asyncServer.on("/api/provision", HTTP_POST, handleApiProvision);
   asyncServer.on("/api/disconnect/{deviceId}", HTTP_POST, handleApiDisconnect);
   asyncServer.on("/api/queue", HTTP_GET, handleApiQueue);
+  asyncServer.on("/api/wifi/configure", HTTP_POST, handleApiWifiConfigure);
+  asyncServer.on("/api/wifi/networks", HTTP_GET, handleApiWifiNetworks);
+  asyncServer.on("/api/wifi/credentials", HTTP_GET, handleApiWifiCredentials);
 
   // Captive portal / linking / setup pages
   asyncServer.on("/", HTTP_GET, handleRoot);

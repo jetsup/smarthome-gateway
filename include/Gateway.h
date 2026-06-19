@@ -134,4 +134,13 @@ bool tcpConnect();
 void tcpLoop();
 void checkResetPin();
 
+// ── WiFi credential management (multi-SSID) ─────────────
+int  getSavedWifiCount();
+bool getSavedWifi(int index, String& ssid, String& pass);
+void saveWifiCredential(const String& ssid, const String& pass);
+void removeAllWifiCredentials();
+bool scanAndConnect();
+
+void handleWifiCommand(const String& cmd);
+
 #endif // GATEWAY_H
