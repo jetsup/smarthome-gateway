@@ -52,6 +52,7 @@ bool tcpConnect() {
     Serial.println("TCP connected to " + String(HUB_ADDR) + ":" + HUB_TCP_PORT);
     tcpClient.write(apiKey.c_str(), apiKey.length());
     tcpClient.write('\n');
+    syncWifiCredentials();
     return true;
   }
   Serial.println("TCP connect failed");
@@ -140,6 +141,19 @@ void removeAllWifiCredentials() {
   prefs.end();
   prefs.begin(NVS_NAMESPACE, false);
   Serial.println("All saved WiFi credentials removed");
+}
+
+void syncWifiCredentials() {
+  int count = getSavedWifiCount();
+  if (count == 0) return;
+  String msg = "CREDS:" + String(count);
+  for (int i = 0; i < count; i++) {
+    String s, p;
+    getSavedWifi(i, s, p);
+    msg += ":" + s + ":" + p;
+  }
+  tcpClient.println(msg.c_str());
+  Serial.printf("Synced %d Wi-Fi credentials to hub\n", count);
 }
 
 bool scanAndConnect() {

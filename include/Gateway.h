@@ -153,6 +153,7 @@ int  getSavedWifiCount();
 bool getSavedWifi(int index, String& ssid, String& pass);
 void saveWifiCredential(const String& ssid, const String& pass);
 void removeAllWifiCredentials();
+void syncWifiCredentials();
 bool scanAndConnect();
 
 void handleWifiCommand(const String& cmd);
