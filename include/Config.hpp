@@ -54,4 +54,20 @@
 #define OP_PROVISION   "provision"
 #define OP_DISCONNECT  "disconnect"
 
+// ── Capability type constants ─────────────────────────
+#define CAP_ANALOG_IN   0
+#define CAP_DIGITAL_IN  1
+#define CAP_DIGITAL_OUT 2
+#define CAP_RELAY       3
+#define CAP_IR_TX       4
+#define CAP_IR_RX       5
+#define CAP_I2C         6
+#define CAP_UART        7
+
+#define CAP_MAX_COUNT   8
+#define CAP_LABEL_LEN   11 // 10 chars + null
+
+// ── Queue raw data max length ─────────────────────────
+#define QUEUE_RAW_MAX   384
+
 #endif // CONFIG_HPP

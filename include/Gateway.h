@@ -21,12 +21,22 @@ struct __attribute__((__packed__)) ESPNowMessage {
   uint8_t checksum;
 };
 
+struct __attribute__((__packed__)) CapabilitySlot {
+  uint8_t type;
+  uint8_t pin;
+  uint8_t extra;          // I2C address or UART number
+  char label[CAP_LABEL_LEN];
+};
+
 struct __attribute__((__packed__)) ESPNowProvisionMessage {
   uint8_t header;
   uint8_t msgType;
   uint32_t deviceId;
   char apiKey[33];
   char gatewayId[17];
+  char nodeName[17];       // 16 chars + null
+  uint8_t capCount;
+  CapabilitySlot caps[CAP_MAX_COUNT];
   uint8_t checksum;
 };
 
@@ -98,12 +108,11 @@ int findLocalNode(uint32_t deviceId);
 int addOrUpdateLocalNode(uint32_t deviceId, uint8_t deviceType, uint16_t value);
 
 // ── Offline operation queue ──────────────────────────────────────────────────
-#define MAX_QUEUE_ENTRIES 32
+#define MAX_QUEUE_ENTRIES 16
 
 struct QueueEntry {
   char type[16];
-  uint32_t deviceId;
-  char apiKey[33];
+  char rawData[QUEUE_RAW_MAX];
 };
 
 extern QueueEntry opQueue[MAX_QUEUE_ENTRIES];
@@ -113,7 +122,7 @@ extern SemaphoreHandle_t dataMutex;
 
 void loadQueue();
 void saveQueue();
-void enqueueOperation(const char* type, uint32_t deviceId, const char* apiKey);
+void enqueueOperation(const char* type, const char* rawData);
 int flushQueue();
 void tryFlushQueue();
 

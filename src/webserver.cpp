@@ -51,17 +51,13 @@ void loadQueue() {
 
     int c1 = line.indexOf(':');
     if (c1 < 0) continue;
-    int c2 = line.indexOf(':', c1 + 1);
-    if (c2 < 0) continue;
 
     QueueEntry& e = opQueue[opQueueCount];
     memset(&e, 0, sizeof(e));
     String typeStr = line.substring(0, c1);
     typeStr.toCharArray(e.type, sizeof(e.type));
-    String devStr = line.substring(c1 + 1, c2);
-    e.deviceId = (uint32_t)devStr.toInt();
-    String keyStr = line.substring(c2 + 1);
-    keyStr.toCharArray(e.apiKey, sizeof(e.apiKey));
+    String dataStr = line.substring(c1 + 1);
+    dataStr.toCharArray(e.rawData, sizeof(e.rawData));
     opQueueCount++;
   }
 }
@@ -71,7 +67,7 @@ void saveQueue() {
   String raw;
   for (int i = 0; i < opQueueCount; i++) {
     if (i > 0) raw += '\n';
-    raw += String(opQueue[i].type) + ':' + String(opQueue[i].deviceId) + ':' + String(opQueue[i].apiKey);
+    raw += String(opQueue[i].type) + ':' + String(opQueue[i].rawData);
   }
   prefs.putString(QUEUE_NVS_KEY, raw);
 }
@@ -86,7 +82,7 @@ void tryFlushQueue() {
   }
 }
 
-void enqueueOperation(const char* type, uint32_t deviceId, const char* apiKey) {
+void enqueueOperation(const char* type, const char* rawData) {
   if (dataMutex) xSemaphoreTake(dataMutex, portMAX_DELAY);
   if (opQueueCount >= MAX_QUEUE_ENTRIES) {
     if (dataMutex) xSemaphoreGive(dataMutex);
@@ -95,8 +91,7 @@ void enqueueOperation(const char* type, uint32_t deviceId, const char* apiKey) {
   QueueEntry& e = opQueue[opQueueCount++];
   memset(&e, 0, sizeof(e));
   strncpy(e.type, type, sizeof(e.type) - 1);
-  e.deviceId = deviceId;
-  if (apiKey) strncpy(e.apiKey, apiKey, sizeof(e.apiKey) - 1);
+  if (rawData) strncpy(e.rawData, rawData, sizeof(e.rawData) - 1);
   saveQueue();
   if (dataMutex) xSemaphoreGive(dataMutex);
 }
@@ -120,17 +115,28 @@ int flushQueue() {
     QueueEntry& e = opQueue[i];
     if (strcmp(e.type, OP_PROVISION) == 0) {
       if (tcpClient.connected()) {
-        tcpClient.printf("BB:%u:%s:%s:%d\n", e.deviceId, e.apiKey, "", 0);
-        tcpClient.printf("ACK:provision:%u\n", e.deviceId);
-        Serial.printf("Queue flush: provision node %u\n", e.deviceId);
+        tcpClient.printf("%s\n", e.rawData);
+        // Extract deviceId from rawData for the ACK
+        int c1 = 0, c2 = 0;
+        // rawData = "BB:deviceId:..."
+        c1 = String(e.rawData).indexOf(':');
+        if (c1 >= 0) c2 = String(e.rawData).indexOf(':', c1 + 1);
+        if (c2 >= 0) {
+          uint32_t devId = (uint32_t)String(e.rawData).substring(c1 + 1, c2).toInt();
+          tcpClient.printf("ACK:provision:%u\n", devId);
+          Serial.printf("Queue flush: provision node %u\n", devId);
+        } else {
+          Serial.printf("Queue flush: provision (raw=%s)\n", e.rawData);
+        }
         flushed++;
       } else {
         temp[kept++] = e;
       }
     } else if (strcmp(e.type, OP_DISCONNECT) == 0) {
       if (tcpClient.connected()) {
-        tcpClient.printf("DEL:%u:\n", e.deviceId);
-        Serial.printf("Queue flush: disconnect node %u\n", e.deviceId);
+        tcpClient.printf("%s\n", e.rawData);
+        uint32_t devId = (uint32_t)String(e.rawData).toInt();
+        Serial.printf("Queue flush: disconnect node %u\n", devId);
         flushed++;
       } else {
         temp[kept++] = e;
@@ -182,9 +188,11 @@ static void handleApiNodesList(AsyncWebServerRequest* req) {
   sendJSON(req, 200, json);
 }
 
-// GET /api/nodes/{deviceId}
+// GET /api/nodes/{deviceId} — parse deviceId from URL
 static void handleApiNodeGet(AsyncWebServerRequest* req) {
-  uint32_t deviceId = (uint32_t)req->pathArg(0).toInt();
+  String url = req->url();
+  url.remove(0, 11); // remove "/api/nodes/"
+  uint32_t deviceId = (uint32_t)url.toInt();
   if (dataMutex) xSemaphoreTake(dataMutex, portMAX_DELAY);
   int idx = findLocalNode(deviceId);
   if (idx < 0) {
@@ -201,13 +209,20 @@ static void handleApiNodeGet(AsyncWebServerRequest* req) {
   sendJSON(req, 200, json);
 }
 
-// POST /api/nodes/{deviceId}/command
+// POST /api/nodes/{deviceId}/command — parse deviceId from URL
 static void handleApiNodeCommand(AsyncWebServerRequest* req) {
   if (currentState != STATE_MESH) {
     sendError(req, 503, "Gateway not in mesh mode");
     return;
   }
-  uint32_t deviceId = (uint32_t)req->pathArg(0).toInt();
+  String url = req->url();
+  url.remove(0, 11); // remove "/api/nodes/"
+  int slash = url.indexOf('/');
+  if (slash < 0) {
+    sendError(req, 400, "Invalid path");
+    return;
+  }
+  uint32_t deviceId = (uint32_t)url.substring(0, slash).toInt();
 
   // Read value from body
   if (req->contentLength() == 0) {
@@ -287,6 +302,8 @@ static void handleApiProvision(AsyncWebServerRequest* req) {
     return;
   }
   String body = req->arg("plain");
+
+  // Extract deviceId
   int didPos = body.indexOf("\"deviceId\"");
   if (didPos < 0) {
     sendError(req, 400, "Missing deviceId");
@@ -311,30 +328,74 @@ static void handleApiProvision(AsyncWebServerRequest* req) {
     }
   }
 
+  // Extract gatewayId
+  String gatewayIdStr;
+  int gwPos = body.indexOf("\"gatewayId\"");
+  if (gwPos >= 0) {
+    colon = body.indexOf(':', gwPos);
+    int qs = body.indexOf('"', colon + 1);
+    int qe = body.indexOf('"', qs + 1);
+    if (qs >= 0 && qe > qs) {
+      gatewayIdStr = body.substring(qs + 1, qe);
+    }
+  }
+
+  // Extract nodeName
+  String nodeNameStr;
+  int nnPos = body.indexOf("\"nodeName\"");
+  if (nnPos >= 0) {
+    colon = body.indexOf(':', nnPos);
+    int qs = body.indexOf('"', colon + 1);
+    int qe = body.indexOf('"', qs + 1);
+    if (qs >= 0 && qe > qs) {
+      nodeNameStr = body.substring(qs + 1, qe);
+    }
+  }
+
+  // Extract deviceType
+  uint8_t devType = 0;
+  int dtPos = body.indexOf("\"deviceType\"");
+  if (dtPos >= 0) {
+    colon = body.indexOf(':', dtPos);
+    int ns = colon + 1;
+    while (ns < (int)body.length() && (body[ns] == ' ' || body[ns] == '\t')) ns++;
+    int ne = ns;
+    while (ne < (int)body.length() && body[ne] >= '0' && body[ne] <= '9') ne++;
+    devType = (uint8_t)body.substring(ns, ne).toInt();
+  }
+
+  // Build the full BB: command (capabilities handled by hub, pass "0" for none here)
+  // Format: BB:deviceId:apiKey:gatewayId:deviceType:nodeName:0
+  String bbCmd = "BB:" + String(deviceId) + ":" + apiKeyStr + ":" +
+                 gatewayIdStr + ":" + String(devType) + ":" + nodeNameStr + ":0";
+
   if (tcpClient.connected()) {
     // Send immediately via TCP
-    tcpClient.printf("BB:%u:%s::0\n", deviceId, apiKeyStr.c_str());
+    tcpClient.printf("%s\n", bbCmd.c_str());
     tcpClient.printf("ACK:provision:%u\n", deviceId);
     Serial.printf("Provision sent immediately: node %u\n", deviceId);
     sendJSON(req, 200, "{\"status\":\"sent\"}");
   } else {
     // Queue for later
-    enqueueOperation(OP_PROVISION, deviceId, apiKeyStr.c_str());
+    enqueueOperation(OP_PROVISION, bbCmd.c_str());
     Serial.printf("Provision queued: node %u\n", deviceId);
     sendJSON(req, 200, "{\"status\":\"queued\"}");
   }
 }
 
-// POST /api/disconnect/{deviceId}
+// POST /api/disconnect/{deviceId} — parse deviceId from URL
 static void handleApiDisconnect(AsyncWebServerRequest* req) {
-  uint32_t deviceId = (uint32_t)req->pathArg(0).toInt();
+  String url = req->url();
+  url.remove(0, 16); // remove "/api/disconnect/"
+  uint32_t deviceId = (uint32_t)url.toInt();
+  String devIdStr = String(deviceId);
 
   if (tcpClient.connected()) {
     tcpClient.printf("DEL:%u:\n", deviceId);
     Serial.printf("Disconnect sent immediately: node %u\n", deviceId);
     sendJSON(req, 200, "{\"status\":\"sent\"}");
   } else {
-    enqueueOperation(OP_DISCONNECT, deviceId, nullptr);
+    enqueueOperation(OP_DISCONNECT, devIdStr.c_str());
     Serial.printf("Disconnect queued: node %u\n", deviceId);
     sendJSON(req, 200, "{\"status\":\"queued\"}");
   }
@@ -346,8 +407,10 @@ static void handleApiQueue(AsyncWebServerRequest* req) {
   String json = "[";
   for (int i = 0; i < opQueueCount; i++) {
     if (i > 0) json += ',';
+    String escaped = String(opQueue[i].rawData);
+    escaped.replace("\"", "\\\"");
     json += "{\"type\":\"" + String(opQueue[i].type) +
-            "\",\"deviceId\":" + String(opQueue[i].deviceId) + "}";
+            "\",\"raw\":\"" + escaped + "\"}";
   }
   json += "]";
   if (dataMutex) xSemaphoreGive(dataMutex);
@@ -499,7 +562,7 @@ async function api(method,path,body){
   const opts={method,headers:{'Content-Type':'application/json'}}
   if(TOKEN)opts.headers.Authorization='Bearer '+TOKEN
   if(body)opts.body=JSON.stringify(body)
-  const res=await fetch('/api'+path,opts)
+  const res=await fetch(path,opts)
   const data=await res.json()
   if(!res.ok)throw new Error(data.error||'Request failed')
   return data
@@ -541,7 +604,7 @@ async function fetchGateways(){
 async function selectGateway(gid){
   showStep('saving')
   try{
-    const data=await api('GET','/gateways/'+gid+'/api-key')
+    const data=await api('GET','/gateway/api-key?id='+gid)
     const res=await fetch('/gateway/configure',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({gatewayId:gid,apiKey:data.apiKey})})
     if(!res.ok)throw new Error('Gateway rejected the configuration')
     $('key-display').textContent=data.apiKey
@@ -611,17 +674,34 @@ void handleWiFiConfig(AsyncWebServerRequest* req) {
 }
 
 // ── Handler: Configure (LINKING mode) ────────────────────────────────────────
-void handleApiConfigure(AsyncWebServerRequest* req) {
-  if (req->contentLength() == 0) {
+static void doApiConfigure(AsyncWebServerRequest* req, const String& body);
+
+static String configureBody;
+static bool configureBodyCollecting = false;
+
+static void handleConfigureBody(AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t index, size_t total) {
+  if (!configureBodyCollecting) return;
+  Serial.printf("CONF: configure body chunk index=%u len=%u total=%u\n", index, len, total);
+  configureBody.concat((char*)data, len);
+  if (configureBody.length() >= total) {
+    configureBodyCollecting = false;
+    Serial.printf("CONF: configure body complete (%u bytes), calling doApiConfigure\n", configureBody.length());
+    doApiConfigure(req, configureBody);
+  }
+}
+
+static void doApiConfigure(AsyncWebServerRequest* req, const String& body) {
+  Serial.printf("CONF: doApiConfigure called, body=%s\n", body.c_str());
+  if (body.length() == 0) {
+    Serial.println("CONF: body empty, returning 400");
     sendError(req, 400, "Missing body");
     return;
   }
 
-  String body = req->arg("plain");
-
   // Extract apiKey from JSON
   int akPos = body.indexOf("\"apiKey\"");
   if (akPos < 0) {
+    Serial.println("CONF: apiKey not found in body, returning 400");
     sendError(req, 400, "Missing apiKey");
     return;
   }
@@ -629,16 +709,19 @@ void handleApiConfigure(AsyncWebServerRequest* req) {
   int qs = body.indexOf('"', colon + 1);
   int qe = body.indexOf('"', qs + 1);
   if (qs < 0 || qe <= qs) {
+    Serial.println("CONF: bad JSON format, returning 400");
     sendError(req, 400, "Bad JSON");
     return;
   }
   String newKey = body.substring(qs + 1, qe);
 
   if (newKey.length() == 0) {
+    Serial.println("CONF: empty apiKey, returning 400");
     sendError(req, 400, "Missing apiKey");
     return;
   }
 
+  Serial.printf("CONF: saving apiKey (len=%u), will reboot\n", newKey.length());
   prefs.putString(NVS_KEY_APIKEY, newKey);
   apiKey = newKey;
 
@@ -648,25 +731,49 @@ void handleApiConfigure(AsyncWebServerRequest* req) {
   pendingReboot = true;
 }
 
+void handleApiConfigure(AsyncWebServerRequest* req) {
+  Serial.printf("CONF: POST /gateway/configure (content-length=%u)\n", req->contentLength());
+  configureBodyCollecting = true;
+  configureBody = "";
+  // Response will be sent from handleConfigureBody once body is complete
+}
+
 // ── Handler: Gen204 / hotspot detection ──────────────────────────────────────
 void handleRedirect(AsyncWebServerRequest* req) {
   req->redirect("http://" + WiFi.softAPIP().toString() + "/");
 }
 
-// ── API proxy (forward unhandled /api/* to hub) ───────────────────────────────
-void handleApiProxy(AsyncWebServerRequest* req) {
-  String path = req->url();
+// ── API proxy helpers ─────────────────────────────────────────────────────────
+static void doApiProxy(AsyncWebServerRequest* req, const String& path, const String& body, const String& auth);
+
+static String proxyBody;
+static bool proxyBodyCollecting = false;
+
+static void handleProxyBody(AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t index, size_t total) {
+  if (!proxyBodyCollecting) return;
+  Serial.printf("LINK: proxy body chunk index=%u len=%u total=%u\n", index, len, total);
+  proxyBody.concat((char*)data, len);
+  if (proxyBody.length() >= total) {
+    proxyBodyCollecting = false;
+    Serial.printf("LINK: proxy body complete (%u bytes) — forwarding to hub\n", proxyBody.length());
+    String auth = req->header("Authorization");
+    doApiProxy(req, "/api/auth/login", proxyBody, auth);
+  }
+}
+
+static void doApiProxy(AsyncWebServerRequest* req, const String& path, const String& body, const String& auth) {
   String methodName = (req->method() == HTTP_POST) ? "POST" : "GET";
-  String body = req->arg("plain");
-  String auth = req->header("Authorization");
+  Serial.printf("LINK: doApiProxy %s %s (body=%u bytes)\n", methodName.c_str(), path.c_str(), body.length());
 
   WiFiClient client;
   if (!client.connect(HUB_ADDR, HUB_WEB_PORT)) {
+    Serial.printf("LINK: FAILED to connect to hub %s:%u\n", HUB_ADDR, HUB_WEB_PORT);
     sendError(req, 502, "Hub unreachable");
     return;
   }
+  Serial.printf("LINK: connected to hub %s:%u\n", HUB_ADDR, HUB_WEB_PORT);
 
-  client.setTimeout(3000);
+  client.setTimeout(5000);
 
   client.println(methodName + " " + path + " HTTP/1.1");
   client.println("Host: " + String(HUB_ADDR) + ":" + String(HUB_WEB_PORT));
@@ -683,6 +790,7 @@ void handleApiProxy(AsyncWebServerRequest* req) {
   if (body.length() > 0) {
     client.print(body);
   }
+  Serial.printf("LINK: request sent to hub, awaiting response\n");
 
   String response;
   unsigned long t = millis() + 5000;
@@ -693,6 +801,9 @@ void handleApiProxy(AsyncWebServerRequest* req) {
     }
   }
   client.stop();
+
+  Serial.printf("LINK: hub response (%u bytes): %s\n", response.length(),
+                response.substring(0, response.indexOf("\r\n")).c_str());
 
   int statusCode = 500;
   int nl = response.indexOf("\r\n");
@@ -709,6 +820,35 @@ void handleApiProxy(AsyncWebServerRequest* req) {
   AsyncWebServerResponse* resp = req->beginResponse(statusCode, "application/json", resBody);
   addCORS(resp);
   req->send(resp);
+}
+
+// ── Proxied API handlers ──────────────────────────────────────────────────────
+// POST /auth/login — proxy login to hub (body collected via callback)
+static void handleProxyLogin(AsyncWebServerRequest* req) {
+  Serial.println("LINK: POST /auth/login — collecting body");
+  proxyBodyCollecting = true;
+  proxyBody = "";
+  // Response will be sent from handleProxyBody once body is complete
+}
+
+// GET /gateways — proxy gateway list to hub (no body needed)
+static void handleProxyGateways(AsyncWebServerRequest* req) {
+  Serial.println("LINK: GET /gateways — proxying to hub");
+  String auth = req->header("Authorization");
+  doApiProxy(req, "/api/gateways", "", auth);
+}
+
+// GET /gateway/api-key?id=xxx — proxy api-key fetch to hub (no path params to avoid regex issues)
+static void handleProxyGatewayApiKey(AsyncWebServerRequest* req) {
+  if (!req->hasParam("id")) {
+    sendError(req, 400, "Missing id parameter");
+    return;
+  }
+  String gid = req->getParam("id")->value();
+  Serial.printf("LINK: GET /gateway/api-key?id=%s — proxying to hub\n", gid.c_str());
+  String path = "/api/gateways/" + gid + "/api-key";
+  String auth = req->header("Authorization");
+  doApiProxy(req, path, "", auth);
 }
 
 // ── Handler: POST /api/wifi/configure (save WiFi credentials) ────────────────
@@ -829,12 +969,6 @@ void handleNotFound(AsyncWebServerRequest* req) {
     return;
   }
 
-  // If it starts with /api/, proxy to hub
-  if (req->url().startsWith("/api/")) {
-    handleApiProxy(req);
-    return;
-  }
-
   // Captive portal redirect in AP/LINKING modes
   if (currentState == STATE_AP_SETUP || currentState == STATE_LINKING) {
     req->redirect("http://" + WiFi.softAPIP().toString() + "/");
@@ -846,22 +980,27 @@ void handleNotFound(AsyncWebServerRequest* req) {
 
 // ── Initialization ───────────────────────────────────────────────────────────
 void initWebServer() {
-  // REST API — local routes (registered first so they take priority)
+  // REST API — local routes (no path params to avoid ESP32 regex issues; parsed from URL manually)
   asyncServer.on("/api/nodes", HTTP_GET, handleApiNodesList);
-  asyncServer.on("/api/nodes/{deviceId}", HTTP_GET, handleApiNodeGet);
-  asyncServer.on("/api/nodes/{deviceId}/command", HTTP_POST, handleApiNodeCommand);
+  asyncServer.on("/api/nodes/*", HTTP_GET, handleApiNodeGet);
+  asyncServer.on("/api/nodes/*", HTTP_POST, handleApiNodeCommand);
   asyncServer.on("/api/status", HTTP_GET, handleApiStatus);
   asyncServer.on("/api/provision", HTTP_POST, handleApiProvision);
-  asyncServer.on("/api/disconnect/{deviceId}", HTTP_POST, handleApiDisconnect);
+  asyncServer.on("/api/disconnect/*", HTTP_POST, handleApiDisconnect);
   asyncServer.on("/api/queue", HTTP_GET, handleApiQueue);
   asyncServer.on("/api/wifi/configure", HTTP_POST, handleApiWifiConfigure);
   asyncServer.on("/api/wifi/networks", HTTP_GET, handleApiWifiNetworks);
   asyncServer.on("/api/wifi/credentials", HTTP_GET, handleApiWifiCredentials);
 
+  // Proxy routes for linking page (body handlers for POST data)
+  asyncServer.on("/auth/login", HTTP_POST, handleProxyLogin, nullptr, handleProxyBody);
+  asyncServer.on("/gateways", HTTP_GET, handleProxyGateways);
+  asyncServer.on("/gateway/api-key", HTTP_GET, handleProxyGatewayApiKey);
+
   // Captive portal / linking / setup pages
   asyncServer.on("/", HTTP_GET, handleRoot);
   asyncServer.on("/gateway/link", HTTP_GET, handleRoot);
-  asyncServer.on("/gateway/configure", HTTP_POST, handleApiConfigure);
+  asyncServer.on("/gateway/configure", HTTP_POST, handleApiConfigure, nullptr, handleConfigureBody);
   asyncServer.on("/wifi/connect", HTTP_POST, handleWiFiConfig);
   asyncServer.on("/generate_204", HTTP_GET, handleRedirect);
   asyncServer.on("/hotspot-detect.html", HTTP_GET, handleRedirect);

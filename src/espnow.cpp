@@ -144,22 +144,75 @@ void handleDownlink() {
 }
 
 void handleBBCommand(const String& cmd) {
-  // Format: BB:deviceId:apiKey:gatewayId:deviceType
-  int firstColon = cmd.indexOf(':');
-  if (firstColon < 0) return;
-  int secondColon = cmd.indexOf(':', firstColon + 1);
-  if (secondColon < 0) return;
-  int thirdColon = cmd.indexOf(':', secondColon + 1);
-  if (thirdColon < 0) return;
-  int fourthColon = cmd.indexOf(':', thirdColon + 1);
+  // Format: BB:deviceId:apiKey:gatewayId:deviceType:nodeName:capCount:type1:pin1:extra1:label1:...
+  int c1 = cmd.indexOf(':');
+  if (c1 < 0) return;
+  int c2 = cmd.indexOf(':', c1 + 1);
+  if (c2 < 0) return;
+  int c3 = cmd.indexOf(':', c2 + 1);
+  if (c3 < 0) return;
+  int c4 = cmd.indexOf(':', c3 + 1);
+  if (c4 < 0) return;
+  int c5 = cmd.indexOf(':', c4 + 1);
+  if (c5 < 0) return;
 
-  String devIdStr = cmd.substring(firstColon + 1, secondColon);
-  String apiKeyStr = cmd.substring(secondColon + 1, thirdColon);
-  String gatewayIdStr = cmd.substring(thirdColon + 1, fourthColon > 0 ? fourthColon : cmd.length());
+  String devIdStr = cmd.substring(c1 + 1, c2);
+  String apiKeyStr = cmd.substring(c2 + 1, c3);
+  String gatewayIdStr = cmd.substring(c3 + 1, c4);
+  String devTypeStr = cmd.substring(c4 + 1, c5);
+
+  int c6 = cmd.indexOf(':', c5 + 1);
+  String nodeNameStr;
+  if (c6 < 0) {
+    nodeNameStr = cmd.substring(c5 + 1);
+  } else {
+    nodeNameStr = cmd.substring(c5 + 1, c6);
+  }
 
   uint32_t deviceId = (uint32_t)devIdStr.toInt();
 
-  Serial.printf("BB: Provisioning node %u gateway=%s\n", deviceId, gatewayIdStr.c_str());
+  Serial.printf("BB: Provisioning node %u gateway=%s name=%s\n",
+    deviceId, gatewayIdStr.c_str(), nodeNameStr.c_str());
+
+  // Parse capabilities
+  uint8_t capCount = 0;
+  CapabilitySlot caps[CAP_MAX_COUNT];
+  memset(caps, 0, sizeof(caps));
+
+  if (c6 > 0) {
+    int pos = c6;
+    int ccColon = cmd.indexOf(':', pos + 1);
+    if (ccColon > 0) {
+      capCount = (uint8_t)cmd.substring(pos + 1, ccColon).toInt();
+      if (capCount > CAP_MAX_COUNT) capCount = CAP_MAX_COUNT;
+      pos = ccColon;
+      for (int i = 0; i < capCount; i++) {
+        int tColon = cmd.indexOf(':', pos + 1);
+        if (tColon < 0) break;
+        int pColon = cmd.indexOf(':', tColon + 1);
+        if (pColon < 0) break;
+        int eColon = cmd.indexOf(':', pColon + 1);
+        if (eColon < 0) break;
+        int lColon = cmd.indexOf(':', eColon + 1);
+
+        caps[i].type = (uint8_t)cmd.substring(pos + 1, tColon).toInt();
+        caps[i].pin = (uint8_t)cmd.substring(tColon + 1, pColon).toInt();
+        caps[i].extra = (uint8_t)cmd.substring(pColon + 1, eColon).toInt();
+
+        String label;
+        if (lColon < 0) {
+          label = cmd.substring(eColon + 1);
+        } else {
+          label = cmd.substring(eColon + 1, lColon);
+          pos = lColon;
+        }
+        label.toCharArray(caps[i].label, CAP_LABEL_LEN);
+
+        Serial.printf("  Cap %d: type=%d pin=%d extra=%d label=%s\n",
+          i, caps[i].type, caps[i].pin, caps[i].extra, caps[i].label);
+      }
+    }
+  }
 
   ESPNowProvisionMessage provMsg;
   provMsg.header = 0xAA;
@@ -169,6 +222,10 @@ void handleBBCommand(const String& cmd) {
   apiKeyStr.toCharArray(provMsg.apiKey, sizeof(provMsg.apiKey) - 1);
   memset(provMsg.gatewayId, 0, sizeof(provMsg.gatewayId));
   gatewayIdStr.toCharArray(provMsg.gatewayId, sizeof(provMsg.gatewayId) - 1);
+  memset(provMsg.nodeName, 0, sizeof(provMsg.nodeName));
+  nodeNameStr.toCharArray(provMsg.nodeName, sizeof(provMsg.nodeName) - 1);
+  provMsg.capCount = capCount;
+  memcpy(provMsg.caps, caps, sizeof(caps));
 
   uint8_t calc = 0;
   for (int i = 0; i < (int)sizeof(ESPNowProvisionMessage) - 1; i++) {
@@ -179,7 +236,8 @@ void handleBBCommand(const String& cmd) {
   esp_err_t result =
       esp_now_send(broadcastMac, (uint8_t*)&provMsg,
                    sizeof(ESPNowProvisionMessage));
-  Serial.printf("BB: ESP-NOW send result: %d\n", result);
+  Serial.printf("BB: ESP-NOW send result: %d caps=%d msgSize=%d\n",
+    result, capCount, sizeof(ESPNowProvisionMessage));
 
   tcpClient.printf("ACK:provision:%u\n", deviceId);
 }
