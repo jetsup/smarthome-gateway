@@ -63,6 +63,9 @@ void setup() {
   // Initialize WiFi stack early so asyncServer.begin() doesn't crash
   WiFi.mode(WIFI_AP_STA);
 
+  // Always init ESP-NOW so discovery packets are received in any state
+  initESPNOW();
+
   // Start web server once (handles all states)
   initWebServer();
 
@@ -108,6 +111,7 @@ void setup() {
 
 void loop() {
   checkResetPin();
+  handleESPNOW();
   switch (currentState) {
     case STATE_AP_SETUP:
       dnsServer.processNextRequest();
@@ -130,7 +134,6 @@ void loop() {
         String key = prefs.getString(NVS_KEY_APIKEY, "");
         if (key.length() > 0) {
           apiKey = key;
-          initESPNOW();
           currentState = STATE_MESH;
           tcpConnect();
         } else {
@@ -156,7 +159,6 @@ void loop() {
         attemptReconnect();
       }
       tcpLoop();
-      handleESPNOW();
       handleDownlink();
       if (scanning && millis() - scanStartTime > SCAN_TIMEOUT_MS) {
         scanning = false;

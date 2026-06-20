@@ -129,6 +129,11 @@ void tryFlushQueue();
 // ── Web server ───────────────────────────────────────────────────────────────
 void initWebServer();
 
+// ── Helper: parse uint32 from string (toInt() overflows on values > INT_MAX) ──
+static inline uint32_t parseUint32(const String& s) {
+  return (uint32_t)strtoul(s.c_str(), NULL, 10);
+}
+
 // ── Function declarations ────────────────────────────────────────────────────
 void startAPMode();
 void startLinkingMode();

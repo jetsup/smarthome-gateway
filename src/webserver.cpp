@@ -122,7 +122,7 @@ int flushQueue() {
         c1 = String(e.rawData).indexOf(':');
         if (c1 >= 0) c2 = String(e.rawData).indexOf(':', c1 + 1);
         if (c2 >= 0) {
-          uint32_t devId = (uint32_t)String(e.rawData).substring(c1 + 1, c2).toInt();
+          uint32_t devId = parseUint32(String(e.rawData).substring(c1 + 1, c2));
           tcpClient.printf("ACK:provision:%u\n", devId);
           Serial.printf("Queue flush: provision node %u\n", devId);
         } else {
@@ -135,7 +135,7 @@ int flushQueue() {
     } else if (strcmp(e.type, OP_DISCONNECT) == 0) {
       if (tcpClient.connected()) {
         tcpClient.printf("%s\n", e.rawData);
-        uint32_t devId = (uint32_t)String(e.rawData).toInt();
+        uint32_t devId = parseUint32(String(e.rawData));
         Serial.printf("Queue flush: disconnect node %u\n", devId);
         flushed++;
       } else {
@@ -192,7 +192,7 @@ static void handleApiNodesList(AsyncWebServerRequest* req) {
 static void handleApiNodeGet(AsyncWebServerRequest* req) {
   String url = req->url();
   url.remove(0, 11); // remove "/api/nodes/"
-  uint32_t deviceId = (uint32_t)url.toInt();
+  uint32_t deviceId = parseUint32(url);
   if (dataMutex) xSemaphoreTake(dataMutex, portMAX_DELAY);
   int idx = findLocalNode(deviceId);
   if (idx < 0) {
@@ -222,7 +222,7 @@ static void handleApiNodeCommand(AsyncWebServerRequest* req) {
     sendError(req, 400, "Invalid path");
     return;
   }
-  uint32_t deviceId = (uint32_t)url.substring(0, slash).toInt();
+  uint32_t deviceId = parseUint32(url.substring(0, slash));
 
   // Read value from body
   if (req->contentLength() == 0) {
@@ -314,7 +314,7 @@ static void handleApiProvision(AsyncWebServerRequest* req) {
   while (numStart < (int)body.length() && (body[numStart] == ' ' || body[numStart] == '\t')) numStart++;
   int numEnd = numStart;
   while (numEnd < (int)body.length() && body[numEnd] >= '0' && body[numEnd] <= '9') numEnd++;
-  uint32_t deviceId = (uint32_t)body.substring(numStart, numEnd).toInt();
+  uint32_t deviceId = parseUint32(body.substring(numStart, numEnd));
 
   // Extract apiKey
   String apiKeyStr;
@@ -387,7 +387,7 @@ static void handleApiProvision(AsyncWebServerRequest* req) {
 static void handleApiDisconnect(AsyncWebServerRequest* req) {
   String url = req->url();
   url.remove(0, 16); // remove "/api/disconnect/"
-  uint32_t deviceId = (uint32_t)url.toInt();
+  uint32_t deviceId = parseUint32(url);
   String devIdStr = String(deviceId);
 
   if (tcpClient.connected()) {

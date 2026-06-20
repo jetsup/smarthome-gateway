@@ -56,13 +56,14 @@
 
 // ── Capability type constants ─────────────────────────
 #define CAP_ANALOG_IN   0
-#define CAP_DIGITAL_IN  1
-#define CAP_DIGITAL_OUT 2
-#define CAP_RELAY       3
-#define CAP_IR_TX       4
-#define CAP_IR_RX       5
-#define CAP_I2C         6
-#define CAP_UART        7
+#define CAP_ANALOG_OUT  1
+#define CAP_DIGITAL_IN  2
+#define CAP_DIGITAL_OUT 3
+#define CAP_RELAY       4
+#define CAP_IR_TX       5
+#define CAP_IR_RX       6
+#define CAP_I2C         7
+#define CAP_UART        8
 
 #define CAP_MAX_COUNT   8
 #define CAP_LABEL_LEN   11 // 10 chars + null

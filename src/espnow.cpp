@@ -169,7 +169,7 @@ void handleBBCommand(const String& cmd) {
     nodeNameStr = cmd.substring(c5 + 1, c6);
   }
 
-  uint32_t deviceId = (uint32_t)devIdStr.toInt();
+  uint32_t deviceId = parseUint32(devIdStr);
 
   Serial.printf("BB: Provisioning node %u gateway=%s name=%s\n",
     deviceId, gatewayIdStr.c_str(), nodeNameStr.c_str());
