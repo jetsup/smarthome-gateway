@@ -38,7 +38,10 @@ void checkResetPin() {
       prefs.remove(NVS_KEY_SSID);
       prefs.remove(NVS_KEY_PASS);
       prefs.remove(NVS_KEY_APIKEY);
+      removeAllWifiCredentials();
+      prefs.remove(QUEUE_NVS_KEY);
       prefs.end();
+      Serial.println("Full system reset — all credentials and queues cleared");
       delay(500);
       ESP.restart();
     }
