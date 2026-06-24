@@ -142,6 +142,7 @@ void attemptReconnect();
 void onESPNOWRecv(const uint8_t* mac, const uint8_t* data, int len);
 void initESPNOW();
 void handleESPNOW();
+void sendGatewayAnnounce();
 void handleDownlink();
 void handleBBCommand(const String& cmd);
 bool tcpConnect();

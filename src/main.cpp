@@ -157,12 +157,25 @@ void loop() {
       }
       break;
 
-    case STATE_MESH:
+    case STATE_MESH: {
+      static unsigned long lastAnnounce = 0;
+      static bool initialAnnounce = false;
+      if (!initialAnnounce) {
+        initialAnnounce = true;
+        sendGatewayAnnounce();
+      }
       if (WiFi.status() != WL_CONNECTED) {
         attemptReconnect();
       }
       tcpLoop();
       handleDownlink();
+
+      // Broadcast gateway presence for HMI discovery every 5s
+      if (millis() - lastAnnounce > 5000) {
+        lastAnnounce = millis();
+        sendGatewayAnnounce();
+      }
+
       if (scanning && millis() - scanStartTime > SCAN_TIMEOUT_MS) {
         scanning = false;
         Serial.println("Scan timed out");
@@ -171,5 +184,6 @@ void loop() {
       // Periodically flush offline operation queue
       tryFlushQueue();
       break;
+    }
   }
 }

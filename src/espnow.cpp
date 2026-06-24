@@ -37,6 +37,45 @@ void initESPNOW() {
   esp_now_add_peer(&peerInfo);
 }
 
+void sendGatewayAnnounce() {
+  uint32_t gwId = prefs.getUInt("gateway_id", 0);
+  String gwName;
+  if (prefs.isKey("gateway_name")) {
+    gwName = prefs.getString("gateway_name");
+  } else {
+    gwName = "SmartHome GW";
+  }
+
+  if (gwId == 0) {
+    // Derive a stable ID from the MAC address last 4 bytes
+    uint64_t mac = ESP.getEfuseMac();
+    gwId = (uint32_t)(mac & 0xFFFFFFFF);
+  }
+
+  struct __attribute__((packed)) {
+    uint8_t header;
+    uint8_t msgType;
+    uint32_t gatewayId;
+    char name[8];
+    uint8_t checksum;
+  } pkt;
+
+  pkt.header = 0xAA;
+  pkt.msgType = MSG_GATEWAY_ANNOUNCE;
+  pkt.gatewayId = gwId;
+
+  memset(pkt.name, 0, sizeof(pkt.name));
+  strncpy(pkt.name, gwName.c_str(), sizeof(pkt.name) - 1);
+
+  uint8_t calc = 0;
+  for (int i = 0; i < (int)sizeof(pkt) - 1; i++) {
+    calc ^= ((uint8_t*)&pkt)[i];
+  }
+  pkt.checksum = calc;
+
+  esp_now_send(broadcastMac, (uint8_t*)&pkt, sizeof(pkt));
+}
+
 void handleESPNOW() {
   while (uplinkTail != uplinkHead) {
     UplinkMessage& msg = uplinkQueue[uplinkTail];
@@ -136,6 +175,14 @@ void handleDownlink() {
     } else {
       Serial.printf("Unknown TCP data (W): %s\n", cmd.c_str());
     }
+  } else if (lead == 'P') {
+    String cmd = tcpClient.readStringUntil('\n');
+    // PAIR:CODE:XXXXXX — pairing code for HMI, log it for serial display
+    if (cmd.startsWith("PAIR:CODE:")) {
+      String code = cmd.substring(10);
+      Serial.printf("HMI PAIRING CODE: %s\n", code.c_str());
+      Serial.println("Enter this code on the HMI to complete pairing.");
+    }
   } else {
     String unknown = tcpClient.readStringUntil('\n');
     Serial.printf("Unknown TCP data (lead=0x%02x): %s\n", lead,
@@ -173,6 +220,16 @@ void handleBBCommand(const String& cmd) {
 
   Serial.printf("BB: Provisioning node %u gateway=%s name=%s\n",
     deviceId, gatewayIdStr.c_str(), nodeNameStr.c_str());
+
+  // Save gateway identity from first BB command (always MAC-derived, never hex DB ID)
+  uint32_t knownId = prefs.getUInt("gateway_id", 0);
+  if (knownId == 0) {
+    uint64_t mac = ESP.getEfuseMac();
+    uint32_t macId = (uint32_t)(mac & 0xFFFFFFFF);
+    prefs.putUInt("gateway_id", macId);
+    prefs.putString("gateway_name", nodeNameStr);
+    Serial.printf("BB: saved gateway_id %u (MAC-derived)\n", macId);
+  }
 
   // Parse capabilities
   uint8_t capCount = 0;

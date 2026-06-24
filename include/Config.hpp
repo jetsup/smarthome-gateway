@@ -35,6 +35,7 @@
 #define MSG_DISCOVERY   3
 #define MSG_SCAN_REQ    4
 #define MSG_PROVISION   5
+#define MSG_GATEWAY_ANNOUNCE 7
 
 // ── Scan timeout (ms) ──────────────────────────────────
 #define SCAN_TIMEOUT_MS 30000

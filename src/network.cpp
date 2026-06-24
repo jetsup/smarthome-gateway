@@ -52,6 +52,10 @@ bool tcpConnect() {
     Serial.println("TCP connected to " + String(HUB_ADDR) + ":" + HUB_TCP_PORT);
     tcpClient.write(apiKey.c_str(), apiKey.length());
     tcpClient.write('\n');
+    // Send MAC-derived decimal announce ID for hub to map → hex DB ID
+    uint64_t mac = ESP.getEfuseMac();
+    uint32_t announceId = (uint32_t)(mac & 0xFFFFFFFF);
+    tcpClient.printf("GWID:%u\n", announceId);
     syncWifiCredentials();
     return true;
   }
