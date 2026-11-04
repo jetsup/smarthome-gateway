@@ -1,3 +1,5 @@
+#include <ArduinoJson.h>
+
 #include "Gateway.h"
 
 static const byte DNS_PORT = 53;
@@ -15,6 +17,7 @@ void startAPMode() {
 
   dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
   Serial.println("DNS server started (captive portal)");
+  bleSetupStart();  // also discoverable from the SmartHome app
 }
 
 void startLinkingMode() {
@@ -29,6 +32,7 @@ void startLinkingMode() {
   Serial.println("Linking AP started: " + String(AP_SSID_LINK));
   Serial.println("AP IP: " + WiFi.softAPIP().toString());
   Serial.println("STA IP: " + WiFi.localIP().toString());
+  bleSetupStart();
 }
 
 void connectToWiFi(const char* ssid, const char* pass) {
@@ -48,8 +52,11 @@ void attemptReconnect() {
 }
 
 bool tcpConnect() {
-  if (tcpClient.connect(HUB_ADDR, HUB_TCP_PORT)) {
-    Serial.println("TCP connected to " + String(HUB_ADDR) + ":" + HUB_TCP_PORT);
+  // Hub address handed over by the app during Bluetooth setup, else the
+  // build-time default.
+  String hubHost = prefs.getString(NVS_KEY_HUBHOST, HUB_ADDR);
+  if (tcpClient.connect(hubHost.c_str(), HUB_TCP_PORT)) {
+    Serial.println("TCP connected to " + hubHost + ":" + HUB_TCP_PORT);
     tcpClient.write(apiKey.c_str(), apiKey.length());
     tcpClient.write('\n');
     // Send MAC-derived decimal announce ID for hub to map → hex DB ID
@@ -147,69 +154,81 @@ void removeAllWifiCredentials() {
   Serial.println("All saved WiFi credentials removed");
 }
 
+// Report the saved networks (in priority order) to the hub. JSON, so SSIDs and
+// passwords containing ':' or other punctuation survive.
 void syncWifiCredentials() {
   int count = getSavedWifiCount();
   if (count == 0) return;
-  String msg = "CREDS:" + String(count);
+  JsonDocument doc;
+  JsonArray nets = doc["nets"].to<JsonArray>();
   for (int i = 0; i < count; i++) {
     String s, p;
-    getSavedWifi(i, s, p);
-    msg += ":" + s + ":" + p;
+    if (!getSavedWifi(i, s, p)) continue;
+    JsonObject o = nets.add<JsonObject>();
+    o["s"] = s;
+    o["p"] = p;
   }
-  tcpClient.println(msg.c_str());
+  String out;
+  serializeJson(doc, out);
+  tcpClient.println("CREDSJ:" + out);
   Serial.printf("Synced %d Wi-Fi credentials to hub\n", count);
 }
+
+// ── Priority-ordered network selection ────────────────────────────────────────
+// Saved networks are kept in priority order (index 0 = most preferred). On boot
+// we scan, keep those that are in range, and try them in that order. If one
+// fails to connect, the next candidate is tried before falling back to setup
+// mode.
+static String candSsid[MAX_SAVED_WIFI];
+static String candPass[MAX_SAVED_WIFI];
+static int candCount = 0;
+static int candPos = 0;
+
+bool connectNextCandidate() {
+  if (candPos >= candCount) return false;
+  wifiSSID = candSsid[candPos];
+  wifiPass = candPass[candPos];
+  candPos++;
+  Serial.printf("Trying saved network %d/%d: %s\n", candPos, candCount, wifiSSID.c_str());
+  connectToWiFi(wifiSSID.c_str(), wifiPass.c_str());
+  return true;
+}
+
+int candidateCount() { return candCount; }
 
 bool scanAndConnect() {
   int count = getSavedWifiCount();
   if (count == 0) return false;
 
-  // Build list of known SSIDs
-  String knownSSIDs[MAX_SAVED_WIFI];
-  String knownPass[MAX_SAVED_WIFI];
-  for (int i = 0; i < count; i++) {
-    getSavedWifi(i, knownSSIDs[i], knownPass[i]);
-  }
-
   Serial.println("Scanning WiFi networks...");
   int networks = WiFi.scanNetworks();
-  if (networks == WIFI_SCAN_FAILED) {
-    Serial.println("WiFi scan failed");
+  if (networks == WIFI_SCAN_FAILED || networks <= 0) {
+    Serial.println(networks == 0 ? "No networks found" : "WiFi scan failed");
     return false;
   }
-  if (networks == 0) {
-    Serial.println("No networks found");
-    return false;
-  }
-
   Serial.printf("Found %d networks\n", networks);
 
-  // Match known SSIDs and find the one with highest RSSI
-  int bestIdx = -1;
-  int bestRSSI = -1000;
-  for (int i = 0; i < networks; i++) {
-    String ssid = WiFi.SSID(i);
-    int rssi = WiFi.RSSI(i);
-    for (int k = 0; k < count; k++) {
-      if (ssid == knownSSIDs[k] && rssi > bestRSSI) {
-        bestRSSI = rssi;
-        bestIdx = k;
-      }
+  candCount = 0;
+  candPos = 0;
+  for (int k = 0; k < count && candCount < MAX_SAVED_WIFI; k++) {
+    String s, p;
+    if (!getSavedWifi(k, s, p)) continue;
+    bool visible = false;
+    for (int i = 0; i < networks; i++) {
+      if (WiFi.SSID(i) == s) { visible = true; break; }
+    }
+    if (visible) {
+      candSsid[candCount] = s;
+      candPass[candCount] = p;
+      candCount++;
     }
   }
-
   WiFi.scanDelete();
 
-  if (bestIdx < 0) {
-    Serial.println("No known networks found in scan");
+  if (candCount == 0) {
+    Serial.println("No saved networks in range");
     return false;
   }
-
-  Serial.printf("Connecting to best known network: %s (RSSI: %d)\n",
-                knownSSIDs[bestIdx].c_str(), bestRSSI);
-
-  wifiSSID = knownSSIDs[bestIdx];
-  wifiPass = knownPass[bestIdx];
-  connectToWiFi(wifiSSID.c_str(), wifiPass.c_str());
-  return true;
+  Serial.printf("%d saved network(s) in range, highest priority first\n", candCount);
+  return connectNextCandidate();
 }

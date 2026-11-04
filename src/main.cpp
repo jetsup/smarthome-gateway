@@ -38,6 +38,7 @@ void checkResetPin() {
       prefs.remove(NVS_KEY_SSID);
       prefs.remove(NVS_KEY_PASS);
       prefs.remove(NVS_KEY_APIKEY);
+      prefs.remove(NVS_KEY_HUBHOST);
       removeAllWifiCredentials();
       prefs.remove(QUEUE_NVS_KEY);
       prefs.end();
@@ -114,6 +115,7 @@ void setup() {
 
 void loop() {
   checkResetPin();
+  bleSetupLoop();
   handleESPNOW();
   switch (currentState) {
     case STATE_AP_SETUP:
@@ -142,9 +144,13 @@ void loop() {
         } else {
           startLinkingMode();
         }
-      } else if (millis() - stateTimer > WIFI_TIMEOUT_MS) {
-        Serial.println("WiFi connect timeout — restarting AP");
-        startAPMode();
+      } else if (millis() - stateTimer > (candidateCount() > 1 ? 15000UL : WIFI_TIMEOUT_MS)) {
+        // This network did not work: try the next saved one in priority order
+        // before giving up and opening the setup hotspot.
+        if (!connectNextCandidate()) {
+          Serial.println("WiFi connect timeout — restarting AP");
+          startAPMode();
+        }
       }
       break;
 
@@ -162,6 +168,7 @@ void loop() {
       static bool initialAnnounce = false;
       if (!initialAnnounce) {
         initialAnnounce = true;
+        bleSetupStop();  // configured: free the Bluetooth memory
         sendGatewayAnnounce();
       }
       if (WiFi.status() != WL_CONNECTED) {

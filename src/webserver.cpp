@@ -427,19 +427,22 @@ static String SETUP_PAGE = R"rawliteral(
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>SmartHome Gateway Setup</title>
 <style>
-body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0d1117;color:#c9d1d9;display:flex;justify-content:center;align-items:center;min-height:100vh}
-.card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:2.5rem;width:100%;max-width:400px;margin:1rem}
-h1{color:#58a6ff;font-size:1.5rem;margin:0 0 0.25rem}
-p{color:#8b949e;font-size:0.9rem;margin:0 0 1.5rem}
-label{display:block;font-size:0.85rem;font-weight:600;margin:0 0 0.25rem;color:#c9d1d9}
-input{width:100%;padding:0.6rem 0.75rem;border:1px solid #30363d;border-radius:8px;background:#0d1117;color:#c9d1d9;font-size:0.9rem;box-sizing:border-box;margin-bottom:1rem}
-input:focus{outline:none;border-color:#58a6ff}
+:root{color-scheme:light dark;--bg:#f6f8fa;--card:#fff;--card2:#f3f4f6;--bd:#d0d7de;--tx:#1f2328;--mu:#59636e;--ac:#0969da;--bad:#cf222e;--ok:#1a7f37}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1117;--card:#161b22;--card2:#1c2128;--bd:#30363d;--tx:#c9d1d9;--mu:#8b949e;--ac:#58a6ff;--bad:#f85149;--ok:#3fb950}}
+
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--tx);display:flex;justify-content:center;align-items:center;min-height:100vh}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:2.5rem;width:100%;max-width:400px;margin:1rem}
+h1{color:var(--ac);font-size:1.5rem;margin:0 0 0.25rem}
+p{color:var(--mu);font-size:0.9rem;margin:0 0 1.5rem}
+label{display:block;font-size:0.85rem;font-weight:600;margin:0 0 0.25rem;color:var(--tx)}
+input{width:100%;padding:0.6rem 0.75rem;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--tx);font-size:0.9rem;box-sizing:border-box;margin-bottom:1rem}
+input:focus{outline:none;border-color:var(--ac)}
 button{width:100%;padding:0.7rem;background:#238636;color:#fff;border:none;border-radius:8px;font-size:1rem;font-weight:600;cursor:pointer}
 button:hover{background:#2ea043}
 .pw-wrap{position:relative}
 .pw-wrap input{padding-right:3.2rem;margin-bottom:0}
-.pw-toggle{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;color:#8b949e;cursor:pointer;font-size:.75rem;padding:4px 6px;width:auto;line-height:1;font-family:inherit;font-weight:500}
-.pw-toggle:hover{color:#c9d1d9}
+.pw-toggle{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--mu);cursor:pointer;font-size:.75rem;padding:4px 6px;width:auto;line-height:1;font-family:inherit;font-weight:500}
+.pw-toggle:hover{color:var(--tx)}
 </style>
 </head>
 <body>
@@ -470,35 +473,38 @@ static String LINKING_HTML = R"rawliteral(
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>SmartHome — Link Gateway</title>
 <style>
+:root{color-scheme:light dark;--bg:#f6f8fa;--card:#fff;--card2:#f3f4f6;--bd:#d0d7de;--tx:#1f2328;--mu:#59636e;--ac:#0969da;--bad:#cf222e;--ok:#1a7f37}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1117;--card:#161b22;--card2:#1c2128;--bd:#30363d;--tx:#c9d1d9;--mu:#8b949e;--ac:#58a6ff;--bad:#f85149;--ok:#3fb950}}
+
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0d1117;color:#c9d1d9;display:flex;justify-content:center;align-items:center;padding:1.5rem;min-height:100vh;-webkit-font-smoothing:antialiased}
-.card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:2rem;width:100%;max-width:400px;box-shadow:0 1px 3px rgba(0,0,0,.3)}
-h1{color:#58a6ff;font-size:1.3rem;font-weight:700;margin-bottom:.25rem}
-p{color:#8b949e;font-size:.88rem;margin-bottom:1.25rem;line-height:1.5}
-label{display:block;font-size:.82rem;font-weight:600;margin-bottom:.25rem;color:#c9d1d9}
-input{width:100%;padding:.6rem .75rem;border:1px solid #30363d;border-radius:8px;background:#0d1117;color:#c9d1d9;font-size:.9rem;margin-bottom:.85rem;transition:border-color .2s;box-sizing:border-box}
-input:focus{outline:none;border-color:#58a6ff;box-shadow:0 0 0 3px rgba(88,166,255,.15)}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--tx);display:flex;justify-content:center;align-items:center;padding:1.5rem;min-height:100vh;-webkit-font-smoothing:antialiased}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:2rem;width:100%;max-width:400px;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+h1{color:var(--ac);font-size:1.3rem;font-weight:700;margin-bottom:.25rem}
+p{color:var(--mu);font-size:.88rem;margin-bottom:1.25rem;line-height:1.5}
+label{display:block;font-size:.82rem;font-weight:600;margin-bottom:.25rem;color:var(--tx)}
+input{width:100%;padding:.6rem .75rem;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--tx);font-size:.9rem;margin-bottom:.85rem;transition:border-color .2s;box-sizing:border-box}
+input:focus{outline:none;border-color:var(--ac);box-shadow:0 0 0 3px rgba(88,166,255,.15)}
 button{width:100%;padding:.65rem;border:none;border-radius:8px;font-size:.9rem;font-weight:600;cursor:pointer;transition:background .2s;font-family:inherit}
 .btn-primary{background:#238636;color:#fff;margin-top:1rem}
 .btn-primary:hover{background:#2ea043}
 .btn-primary:disabled{opacity:.6;cursor:default}
-.btn-secondary{background:transparent;border:1px solid #30363d;color:#c9d1d9;margin-top:.5rem}
-.btn-secondary:hover{background:#1c2128}
-.error{color:#f85149;font-size:.82rem;margin-bottom:.5rem}
+.btn-secondary{background:transparent;border:1px solid var(--bd);color:var(--tx);margin-top:.5rem}
+.btn-secondary:hover{background:var(--card2)}
+.error{color:var(--bad);font-size:.82rem;margin-bottom:.5rem}
 .pw-wrap{position:relative}
 .pw-wrap input{padding-right:3.2rem;margin-bottom:0}
-.pw-toggle{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;color:#8b949e;cursor:pointer;font-size:.75rem;padding:4px 6px;width:auto;line-height:1;font-family:inherit;font-weight:500}
-.pw-toggle:hover{color:#c9d1d9}
+.pw-toggle{position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--mu);cursor:pointer;font-size:.75rem;padding:4px 6px;width:auto;line-height:1;font-family:inherit;font-weight:500}
+.pw-toggle:hover{color:var(--tx)}
 .gw-list{display:flex;flex-direction:column;gap:.5rem}
-.gw-opt{display:flex;justify-content:space-between;align-items:center;padding:.65rem .85rem;border:1px solid #30363d;border-radius:8px;background:#0d1117;cursor:pointer;font-size:.85rem;text-align:left;width:100%;transition:border-color .2s}
-.gw-opt:hover{border-color:#58a6ff;background:#1c2128}
-.gw-opt strong{color:#58a6ff}
-.gw-opt code{font-size:.7rem;color:#8b949e;background:#161b22;padding:.1rem .35rem;border-radius:4px}
+.gw-opt{display:flex;justify-content:space-between;align-items:center;padding:.65rem .85rem;border:1px solid var(--bd);border-radius:8px;background:var(--bg);cursor:pointer;font-size:.85rem;text-align:left;width:100%;transition:border-color .2s}
+.gw-opt:hover{border-color:var(--ac);background:var(--card2)}
+.gw-opt strong{color:var(--ac)}
+.gw-opt code{font-size:.7rem;color:var(--mu);background:var(--card);padding:.1rem .35rem;border-radius:4px}
 .empty{text-align:center;padding:1rem 0}
-.empty p{color:#8b949e;margin-bottom:.5rem}
-.done-icon{font-size:2rem;text-align:center;margin-bottom:.5rem;color:#3fb950}
-.key-box{background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:.6rem;font-family:monospace;font-size:.78rem;word-break:break-all;text-align:center;margin-bottom:0}
-.spinner{border:3px solid #30363d;border-top:3px solid #58a6ff;border-radius:50%;width:28px;height:28px;animation:spin .8s linear infinite;margin:1rem auto}
+.empty p{color:var(--mu);margin-bottom:.5rem}
+.done-icon{font-size:2rem;text-align:center;margin-bottom:.5rem;color:var(--ok)}
+.key-box{background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:.6rem;font-family:monospace;font-size:.78rem;word-break:break-all;text-align:center;margin-bottom:0}
+.spinner{border:3px solid var(--bd);border-top:3px solid var(--ac);border-radius:50%;width:28px;height:28px;animation:spin .8s linear infinite;margin:1rem auto}
 @keyframes spin{to{transform:rotate(360deg)}}
 .hidden{display:none}
 .form-group{margin-bottom:.85rem}
@@ -625,8 +631,11 @@ static String CONNECTING_PAGE = R"rawliteral(
 <meta http-equiv='refresh' content='2;url=/status'>
 <title>Connecting…</title>
 <style>
-body{background:#0d1117;color:#c9d1d9;font-family:sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;text-align:center}
-.spinner{border:3px solid #30363d;border-top:3px solid #58a6ff;border-radius:50%;width:40px;height:40px;animation:spin 1s linear infinite;margin:0 auto 1rem}
+:root{color-scheme:light dark;--bg:#f6f8fa;--card:#fff;--card2:#f3f4f6;--bd:#d0d7de;--tx:#1f2328;--mu:#59636e;--ac:#0969da;--bad:#cf222e;--ok:#1a7f37}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1117;--card:#161b22;--card2:#1c2128;--bd:#30363d;--tx:#c9d1d9;--mu:#8b949e;--ac:#58a6ff;--bad:#f85149;--ok:#3fb950}}
+
+body{background:var(--bg);color:var(--tx);font-family:sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;text-align:center}
+.spinner{border:3px solid var(--bd);border-top:3px solid var(--ac);border-radius:50%;width:40px;height:40px;animation:spin 1s linear infinite;margin:0 auto 1rem}
 @keyframes spin{to{transform:rotate(360deg)}}
 </style></head><body><div><div class='spinner'></div>
 <h2>Connecting to WiFi…</h2></div></body></html>
@@ -677,14 +686,12 @@ void handleWiFiConfig(AsyncWebServerRequest* req) {
 static void doApiConfigure(AsyncWebServerRequest* req, const String& body);
 
 static String configureBody;
-static bool configureBodyCollecting = false;
 
 static void handleConfigureBody(AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t index, size_t total) {
-  if (!configureBodyCollecting) return;
+  if (index == 0) configureBody = "";
   Serial.printf("CONF: configure body chunk index=%u len=%u total=%u\n", index, len, total);
   configureBody.concat((char*)data, len);
   if (configureBody.length() >= total) {
-    configureBodyCollecting = false;
     Serial.printf("CONF: configure body complete (%u bytes), calling doApiConfigure\n", configureBody.length());
     doApiConfigure(req, configureBody);
   }
@@ -733,9 +740,8 @@ static void doApiConfigure(AsyncWebServerRequest* req, const String& body) {
 
 void handleApiConfigure(AsyncWebServerRequest* req) {
   Serial.printf("CONF: POST /gateway/configure (content-length=%u)\n", req->contentLength());
-  configureBodyCollecting = true;
-  configureBody = "";
-  // Response will be sent from handleConfigureBody once body is complete
+  // Normally answered from handleConfigureBody; only reached un-answered when empty.
+  if (req->contentLength() == 0) sendError(req, 400, "Missing body");
 }
 
 // ── Handler: Gen204 / hotspot detection ──────────────────────────────────────
@@ -747,14 +753,14 @@ void handleRedirect(AsyncWebServerRequest* req) {
 static void doApiProxy(AsyncWebServerRequest* req, const String& path, const String& body, const String& auth);
 
 static String proxyBody;
-static bool proxyBodyCollecting = false;
 
 static void handleProxyBody(AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t index, size_t total) {
-  if (!proxyBodyCollecting) return;
+  // Body callbacks fire BEFORE the route's request handler, so state must be
+  // reset on the first chunk rather than in the handler.
+  if (index == 0) proxyBody = "";
   Serial.printf("LINK: proxy body chunk index=%u len=%u total=%u\n", index, len, total);
   proxyBody.concat((char*)data, len);
   if (proxyBody.length() >= total) {
-    proxyBodyCollecting = false;
     Serial.printf("LINK: proxy body complete (%u bytes) — forwarding to hub\n", proxyBody.length());
     String auth = req->header("Authorization");
     doApiProxy(req, "/api/auth/login", proxyBody, auth);
@@ -825,10 +831,8 @@ static void doApiProxy(AsyncWebServerRequest* req, const String& path, const Str
 // ── Proxied API handlers ──────────────────────────────────────────────────────
 // POST /auth/login — proxy login to hub (body collected via callback)
 static void handleProxyLogin(AsyncWebServerRequest* req) {
-  Serial.println("LINK: POST /auth/login — collecting body");
-  proxyBodyCollecting = true;
-  proxyBody = "";
-  // Response will be sent from handleProxyBody once body is complete
+  // Normally answered from handleProxyBody; only reached un-answered when empty.
+  if (req->contentLength() == 0) sendError(req, 400, "Missing body");
 }
 
 // GET /gateways — proxy gateway list to hub (no body needed)

@@ -2,15 +2,23 @@
 #define CONFIG_HPP
 
 // ── Hardcoded Hub Address (captive portal linking) ─────
+// Override at build time with -DHUB_ADDR=\"x.x.x.x\" in platformio.ini build_flags
+#ifndef HUB_ADDR
 #define HUB_ADDR     "192.168.100.100"
+#endif
+#ifndef HUB_WEB_PORT
 #define HUB_WEB_PORT 9000
+#endif
+#ifndef HUB_TCP_PORT
 #define HUB_TCP_PORT 9010
+#endif
 
 // ── NVS key names ───────────────────────────────────────
 #define NVS_NAMESPACE  "smarthome"
 #define NVS_KEY_SSID   "wifi_ssid"
 #define NVS_KEY_PASS   "wifi_pass"
 #define NVS_KEY_APIKEY "api_key"
+#define NVS_KEY_HUBHOST "hub_host"          // hub address handed over by the app
 #define NVS_WIFI_COUNT "wifi_count"        // number of saved credentials
 #define NVS_WIFI_SSID_PREFIX "w_s_"        // + index = "w_s_0", "w_s_1" ...
 #define NVS_WIFI_PASS_PREFIX "w_p_"        // + index = "w_p_0", "w_p_1" ...

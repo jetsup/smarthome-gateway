@@ -80,7 +80,7 @@ pio device monitor -b 115200
 - Reboot deferred to `loop()` to ensure HTTP response is flushed
 
 ### MESH
-- TCP connection to hub at `192.168.4.1:9010`
+- TCP connection to the hub at `HUB_ADDR:HUB_TCP_PORT` (see Configuration; default `192.168.100.100:9010`)
 - Authenticates with API key (newline-terminated)
 - ESP-NOW receive interrupt → ring buffer → TCP send
 - TCP receive → ESP-NOW broadcast

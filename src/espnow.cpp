@@ -1,3 +1,5 @@
+#include <ArduinoJson.h>
+
 #include "Gateway.h"
 
 void onESPNOWRecv(const uint8_t* mac, const uint8_t* data, int len) {
@@ -56,7 +58,7 @@ void sendGatewayAnnounce() {
     uint8_t header;
     uint8_t msgType;
     uint32_t gatewayId;
-    char name[8];
+    char name[32];
     uint8_t checksum;
   } pkt;
 
@@ -170,10 +172,26 @@ void handleDownlink() {
     }
   } else if (lead == 'W') {
     String cmd = tcpClient.readStringUntil('\n');
-    if (cmd.startsWith("WIFI:")) {
+    if (cmd.startsWith("WIFISET:")) {
+      handleWifiSet(cmd);
+    } else if (cmd.startsWith("WIFI:")) {
       handleWifiCommand(cmd);
     } else {
       Serial.printf("Unknown TCP data (W): %s\n", cmd.c_str());
+    }
+  } else if (lead == 'G') {
+    String cmd = tcpClient.readStringUntil('\n');
+    // GWNAME:<name> — the hub tells the gateway what the user called it, so it
+    // announces the right name to HMIs over ESP-NOW.
+    if (cmd.startsWith("GWNAME:")) {
+      String name = cmd.substring(7);
+      name.trim();
+      if (name.length() > 0 && prefs.getString("gateway_name", "") != name) {
+        prefs.putString("gateway_name", name);
+        Serial.printf("Gateway name set by hub: %s\n", name.c_str());
+      }
+    } else {
+      Serial.printf("Unknown TCP data (G): %s\n", cmd.c_str());
     }
   } else if (lead == 'P') {
     String cmd = tcpClient.readStringUntil('\n');
@@ -227,7 +245,8 @@ void handleBBCommand(const String& cmd) {
     uint64_t mac = ESP.getEfuseMac();
     uint32_t macId = (uint32_t)(mac & 0xFFFFFFFF);
     prefs.putUInt("gateway_id", macId);
-    prefs.putString("gateway_name", nodeNameStr);
+    // NB: the gateway's *own* name comes from the hub (GWNAME:) or the app
+    // (Bluetooth setup). It must never be taken from a node's name.
     Serial.printf("BB: saved gateway_id %u (MAC-derived)\n", macId);
   }
 
@@ -326,4 +345,36 @@ void handleWifiCommand(const String& cmd) {
   connectToWiFi(wifiSSID.c_str(), wifiPass.c_str());
 
   tcpClient.printf("ACK:wifi:%s\n", ssid.c_str());
+}
+
+// WIFISET:{"nets":[{"s":"ssid","p":"pass"},...]} — replace the saved networks
+// with the hub's ordered list (index 0 = highest priority). We stay on the
+// current network unless it was removed, so a reorder never drops the link.
+void handleWifiSet(const String& cmd) {
+  JsonDocument doc;
+  if (deserializeJson(doc, cmd.substring(8)) != DeserializationError::Ok) {
+    Serial.println("WIFISET: bad JSON");
+    return;
+  }
+  JsonArray nets = doc["nets"].as<JsonArray>();
+
+  String keepCurrent = WiFi.status() == WL_CONNECTED ? WiFi.SSID() : String("");
+  removeAllWifiCredentials();
+  int saved = 0;
+  bool currentStillSaved = false;
+  for (JsonObject n : nets) {
+    String s = n["s"] | "";
+    String p = n["p"] | "";
+    if (s.length() == 0 || saved >= MAX_SAVED_WIFI) continue;
+    saveWifiCredential(s, p);
+    saved++;
+    if (s == keepCurrent) currentStillSaved = true;
+  }
+  Serial.printf("WIFISET: %d network(s) saved in hub order\n", saved);
+
+  if (keepCurrent.length() > 0 && !currentStillSaved) {
+    Serial.println("WIFISET: current network was removed — reselecting");
+    scanAndConnect();
+  }
+  tcpClient.printf("ACK:wifiset:%d\n", saved);
 }

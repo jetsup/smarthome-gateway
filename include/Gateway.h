@@ -156,7 +156,15 @@ void saveWifiCredential(const String& ssid, const String& pass);
 void removeAllWifiCredentials();
 void syncWifiCredentials();
 bool scanAndConnect();
+bool connectNextCandidate();
+int candidateCount();
+void handleWifiSet(const String& cmd);
 
 void handleWifiCommand(const String& cmd);
+
+// ── Bluetooth LE onboarding (ble_setup.cpp) ─────────────
+void bleSetupStart();
+void bleSetupStop();
+void bleSetupLoop();
 
 #endif // GATEWAY_H
