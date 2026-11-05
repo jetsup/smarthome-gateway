@@ -55,7 +55,7 @@ bool tcpConnect() {
   // Hub address handed over by the app during Bluetooth setup, else the
   // build-time default.
   String hubHost = prefs.getString(NVS_KEY_HUBHOST, HUB_ADDR);
-  if (tcpClient.connect(hubHost.c_str(), HUB_TCP_PORT)) {
+  if (tcpClient.connect(hubHost.c_str(), HUB_TCP_PORT, 1200)) {  // short timeout: a down hub must not stall the mesh loop
     Serial.println("TCP connected to " + hubHost + ":" + HUB_TCP_PORT);
     tcpClient.write(apiKey.c_str(), apiKey.length());
     tcpClient.write('\n');

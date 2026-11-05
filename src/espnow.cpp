@@ -39,6 +39,24 @@ void initESPNOW() {
   esp_now_add_peer(&peerInfo);
 }
 
+// ── Shared clock ─────────────────────────────────────────────────────────────
+uint32_t timeBaseEpoch = 0;
+uint32_t timeBaseMillis = 0;
+uint8_t timeSource = 0;  // 0 unknown, 1 rtc, 2 hub
+
+void broadcastTime() {
+  if (timeBaseEpoch == 0) return;
+  uint32_t now = timeBaseEpoch + (millis() - timeBaseMillis) / 1000;
+  uint8_t payload[5] = {(uint8_t)now, (uint8_t)(now >> 8), (uint8_t)(now >> 16), (uint8_t)(now >> 24), timeSource};
+  uint8_t f[8 + 5];
+  f[0] = 0xAA; f[1] = MSG_TIME; f[2] = f[3] = f[4] = f[5] = 0; f[6] = 5;
+  memcpy(f + 7, payload, 5);
+  uint8_t x = 0;
+  for (int i = 0; i < 12; i++) x ^= f[i];
+  f[12] = x;
+  esp_now_send(broadcastMac, f, sizeof(f));
+}
+
 void sendGatewayAnnounce() {
   uint32_t gwId = prefs.getUInt("gateway_id", 0);
   String gwName;
@@ -123,6 +141,16 @@ void handleESPNOW() {
   }
 }
 
+// ESP-NOW broadcasts have no acknowledgement or retry, so a single frame is
+// easily lost (the node is also transmitting). Commands are idempotent ("set pin
+// to value"), so send each one a few times a few milliseconds apart.
+static void sendReliable(const uint8_t* data, size_t len, int times = 4, int gapMs = 15) {
+  for (int i = 0; i < times; i++) {
+    esp_now_send(broadcastMac, data, len);
+    if (i + 1 < times) delay(gapMs);
+  }
+}
+
 void handleDownlink() {
   if (!tcpClient.available()) return;
   int avail = tcpClient.available();
@@ -131,12 +159,33 @@ void handleDownlink() {
   if (lead < 0) return;
 
   if (lead == 0xAA) {
-    if (avail < (int)sizeof(ESPNowMessage)) return;
+    // Classic 9-byte frames (types 1-7) or length-prefixed frames (type >= 8).
+    if (avail < 2) return;
+    uint8_t head[2];
+    tcpClient.readBytes(head, 2);
+    if (head[0] != 0xAA) return;
+
+    if (head[1] >= 8) {
+      uint8_t rest[5];  // deviceId[4] + len
+      if (tcpClient.readBytes(rest, 5) != 5) return;
+      uint8_t plen = rest[4];
+      static uint8_t frame[2 + 5 + 255 + 1];
+      memcpy(frame, head, 2);
+      memcpy(frame + 2, rest, 5);
+      if (tcpClient.readBytes(frame + 7, plen + 1) != plen + 1) return;
+      uint8_t x = 0;
+      for (int i = 0; i < 7 + plen; i++) x ^= frame[i];
+      if (x != frame[7 + plen]) return;
+      uint32_t devId = rest[0] | (rest[1] << 8) | (rest[2] << 16) | ((uint32_t)rest[3] << 24);
+      Serial.printf("Downlink: deviceId=%u msgType=%u len=%u\n", devId, head[1], plen);
+      sendReliable(frame, 8 + plen);
+      tcpClient.printf("ACK:cmd:%u\n", devId);
+      return;
+    }
 
     ESPNowMessage msg;
-    tcpClient.readBytes((uint8_t*)&msg, sizeof(ESPNowMessage));
-
-    if (msg.header != 0xAA) return;
+    memcpy(&msg, head, 2);
+    if (tcpClient.readBytes(((uint8_t*)&msg) + 2, sizeof(ESPNowMessage) - 2) != (int)sizeof(ESPNowMessage) - 2) return;
 
     uint8_t calc = 0;
     for (int i = 0; i < 8; i++) calc ^= ((uint8_t*)&msg)[i];
@@ -153,12 +202,8 @@ void handleDownlink() {
         esp_now_send(broadcastMac, (uint8_t*)&msg, sizeof(ESPNowMessage));
         break;
 
-      case MSG_PROVISION:
-        esp_now_send(broadcastMac, (uint8_t*)&msg, sizeof(ESPNowMessage));
-        break;
-
       default:
-        esp_now_send(broadcastMac, (uint8_t*)&msg, sizeof(ESPNowMessage));
+        sendReliable((uint8_t*)&msg, sizeof(ESPNowMessage));
         break;
     }
 
@@ -192,6 +237,19 @@ void handleDownlink() {
       }
     } else {
       Serial.printf("Unknown TCP data (G): %s\n", cmd.c_str());
+    }
+  } else if (lead == 'T') {
+    String cmd = tcpClient.readStringUntil('\n');
+    // TIME:<epoch>:<source> — the hub's system clock (RTC module or hub).
+    if (cmd.startsWith("TIME:")) {
+      long epoch = cmd.substring(5).toInt();
+      if (epoch > 1600000000L) {
+        timeBaseEpoch = (uint32_t)epoch;
+        timeBaseMillis = millis();
+        timeSource = cmd.indexOf(":rtc") > 0 ? 1 : 2;
+        Serial.printf("Time set by hub: %ld (%s)\n", epoch, timeSource == 1 ? "rtc" : "hub");
+        broadcastTime();
+      }
     }
   } else if (lead == 'P') {
     String cmd = tcpClient.readStringUntil('\n');
@@ -256,6 +314,8 @@ void handleBBCommand(const String& cmd) {
   memset(caps, 0, sizeof(caps));
 
   if (c6 > 0) {
+    // After the name: capCount, then 7 fields per module:
+    //   type:pin:extra:count:flags:pin2:label
     int pos = c6;
     int ccColon = cmd.indexOf(':', pos + 1);
     if (ccColon > 0) {
@@ -263,29 +323,32 @@ void handleBBCommand(const String& cmd) {
       if (capCount > CAP_MAX_COUNT) capCount = CAP_MAX_COUNT;
       pos = ccColon;
       for (int i = 0; i < capCount; i++) {
-        int tColon = cmd.indexOf(':', pos + 1);
-        if (tColon < 0) break;
-        int pColon = cmd.indexOf(':', tColon + 1);
-        if (pColon < 0) break;
-        int eColon = cmd.indexOf(':', pColon + 1);
-        if (eColon < 0) break;
-        int lColon = cmd.indexOf(':', eColon + 1);
-
-        caps[i].type = (uint8_t)cmd.substring(pos + 1, tColon).toInt();
-        caps[i].pin = (uint8_t)cmd.substring(tColon + 1, pColon).toInt();
-        caps[i].extra = (uint8_t)cmd.substring(pColon + 1, eColon).toInt();
-
-        String label;
-        if (lColon < 0) {
-          label = cmd.substring(eColon + 1);
-        } else {
-          label = cmd.substring(eColon + 1, lColon);
-          pos = lColon;
+        String f[7];
+        int cur = pos;
+        bool ok = true;
+        for (int k = 0; k < 7; k++) {
+          int nx = cmd.indexOf(':', cur + 1);
+          if (k < 6) {
+            if (nx < 0) { ok = false; break; }
+            f[k] = cmd.substring(cur + 1, nx);
+            cur = nx;
+          } else {
+            // label: up to the next ':' or end of line
+            f[k] = (nx < 0) ? cmd.substring(cur + 1) : cmd.substring(cur + 1, nx);
+            cur = (nx < 0) ? cmd.length() : nx;
+          }
         }
-        label.toCharArray(caps[i].label, CAP_LABEL_LEN);
-
-        Serial.printf("  Cap %d: type=%d pin=%d extra=%d label=%s\n",
-          i, caps[i].type, caps[i].pin, caps[i].extra, caps[i].label);
+        if (!ok) break;
+        pos = cur;
+        caps[i].type = (uint8_t)f[0].toInt();
+        caps[i].pin = (uint8_t)f[1].toInt();
+        caps[i].extra = (uint8_t)f[2].toInt();
+        caps[i].count = (uint16_t)f[3].toInt();
+        caps[i].flags = (uint8_t)f[4].toInt();
+        caps[i].pin2 = (uint8_t)f[5].toInt();
+        f[6].toCharArray(caps[i].label, CAP_LABEL_LEN);
+        Serial.printf("  Cap %d: type=%d pin=%d extra=%d count=%d flags=%d pin2=%d label=%s\n",
+          i, caps[i].type, caps[i].pin, caps[i].extra, caps[i].count, caps[i].flags, caps[i].pin2, caps[i].label);
       }
     }
   }
@@ -309,9 +372,12 @@ void handleBBCommand(const String& cmd) {
   }
   provMsg.checksum = calc;
 
-  esp_err_t result =
-      esp_now_send(broadcastMac, (uint8_t*)&provMsg,
-                   sizeof(ESPNowProvisionMessage));
+  esp_err_t result = esp_now_send(broadcastMac, (uint8_t*)&provMsg,
+                                  sizeof(ESPNowProvisionMessage));
+  for (int i = 0; i < 3; i++) {  // repeat: broadcasts are not acknowledged
+    delay(25);
+    esp_now_send(broadcastMac, (uint8_t*)&provMsg, sizeof(ESPNowProvisionMessage));
+  }
   Serial.printf("BB: ESP-NOW send result: %d caps=%d msgSize=%d\n",
     result, capCount, sizeof(ESPNowProvisionMessage));
 

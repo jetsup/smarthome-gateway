@@ -44,6 +44,9 @@
 #define MSG_SCAN_REQ    4
 #define MSG_PROVISION   5
 #define MSG_GATEWAY_ANNOUNCE 7
+#define MSG_READINGS    8   // node -> hub: multi-value sensor readings
+#define MSG_ACTION      9   // hub -> node: actuator action
+#define MSG_TIME        11  // gateway -> nodes: shared clock
 
 // ── Scan timeout (ms) ──────────────────────────────────
 #define SCAN_TIMEOUT_MS 30000

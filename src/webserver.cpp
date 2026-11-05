@@ -534,7 +534,7 @@ button{width:100%;padding:.65rem;border:none;border-radius:8px;font-size:.9rem;f
     <div id="gw-list" class="gw-list"></div>
     <div id="gw-empty" class="empty hidden">
       <p>No gateways found on your account.</p>
-      <p>Go to the dashboard at <strong>http://192.168.100.100:9000/gateways/create</strong> and create one first.</p>
+      <p>Open your hub's web dashboard, go to <strong>Gateways &rarr; Add gateway</strong> and create one first.</p>
       <button class="btn-secondary" onclick="fetchGateways()">Refresh</button>
     </div>
   </div>

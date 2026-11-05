@@ -26,6 +26,9 @@ struct __attribute__((__packed__)) CapabilitySlot {
   uint8_t pin;
   uint8_t extra;          // I2C address or UART number
   char label[CAP_LABEL_LEN];
+  uint16_t count;         // LED count etc.
+  uint8_t flags;          // bit0: NeoPixel ring
+  uint8_t pin2;           // second pin (SCL / TX)
 };
 
 struct __attribute__((__packed__)) ESPNowProvisionMessage {
@@ -73,7 +76,7 @@ extern bool pendingReboot;
 
 // ── ESP-NOW ring buffer ──────────────────────────────────────────────────────
 #define UPLINK_QUEUE_SIZE 32
-#define MAX_MSG_SIZE 64
+#define MAX_MSG_SIZE 100
 
 struct UplinkMessage {
   uint8_t data[MAX_MSG_SIZE];
@@ -143,6 +146,7 @@ void onESPNOWRecv(const uint8_t* mac, const uint8_t* data, int len);
 void initESPNOW();
 void handleESPNOW();
 void sendGatewayAnnounce();
+void broadcastTime();
 void handleDownlink();
 void handleBBCommand(const String& cmd);
 bool tcpConnect();

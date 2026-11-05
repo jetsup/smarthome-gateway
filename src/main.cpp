@@ -177,6 +177,13 @@ void loop() {
       tcpLoop();
       handleDownlink();
 
+      // Share the system clock with nodes every 30 s (once the hub has told us the time)
+      static unsigned long lastTimeBcast = 0;
+      if (millis() - lastTimeBcast > 30000) {
+        lastTimeBcast = millis();
+        broadcastTime();
+      }
+
       // Broadcast gateway presence for HMI discovery every 5s
       if (millis() - lastAnnounce > 5000) {
         lastAnnounce = millis();
