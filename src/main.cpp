@@ -64,6 +64,10 @@ void setup() {
   // Load offline operation queue
   loadQueue();
 
+  // Clock (RTC / internet) and the data log
+  clockInit();
+  dataLogInit();
+
   // Initialize WiFi stack early so asyncServer.begin() doesn't crash
   WiFi.mode(WIFI_AP_STA);
 
@@ -115,6 +119,12 @@ void setup() {
 
 void loop() {
   checkResetPin();
+  clockLoop();
+  if (pendingReboot && currentState == STATE_MESH) {
+    dataLogFlush();
+    delay(400);
+    ESP.restart();
+  }
   bleSetupLoop();
   handleESPNOW();
   switch (currentState) {
@@ -197,6 +207,7 @@ void loop() {
 
       // Periodically flush offline operation queue
       tryFlushQueue();
+      dataLogLoop();
       break;
     }
   }

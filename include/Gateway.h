@@ -167,6 +167,27 @@ void handleWifiSet(const String& cmd);
 
 void handleWifiCommand(const String& cmd);
 
+// ── Clock (clock.cpp) ───────────────────────────────────
+extern bool rtcPresent;
+extern bool rtcValid;
+extern uint8_t timeSource;  // 0 none, 1 rtc, 2 hub, 3 internet
+void clockInit();
+void clockConfigure(int sda, int scl);
+void clockLoop();
+void clockFromHub(uint32_t epoch, bool hubHasRtc);
+bool clockReal();
+uint32_t clockNow();
+uint32_t uptimeSec();
+
+// ── Data log (datalog.cpp) ──────────────────────────────
+void dataLogInit();
+void dataLogConfigure(int storeKind, int maxKb, int sdCs);
+void dataLogFrame(const uint8_t* data, int len);
+void dataLogLoop();
+void dataLogFlush();
+void dataLogAck(uint32_t seq);
+void dataLogTimeKnown();
+
 // ── Bluetooth LE onboarding (ble_setup.cpp) ─────────────
 void bleSetupStart();
 void bleSetupStop();

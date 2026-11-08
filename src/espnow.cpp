@@ -116,6 +116,9 @@ void handleESPNOW() {
       if (dataMutex) xSemaphoreGive(dataMutex);
     }
 
+    // Keep a timestamped copy of every reading (also while the hub is unreachable)
+    dataLogFrame(msg.data, msg.len);
+
     // Forward to hub if connected
     if (tcpClient.connected()) {
       if (msgType == MSG_DISCOVERY) {
@@ -248,12 +251,35 @@ void handleDownlink() {
     if (cmd.startsWith("TIME:")) {
       long epoch = cmd.substring(5).toInt();
       if (epoch > 1600000000L) {
-        timeBaseEpoch = (uint32_t)epoch;
-        timeBaseMillis = millis();
-        timeSource = cmd.indexOf(":rtc") > 0 ? 1 : 2;
-        Serial.printf("Time set by hub: %ld (%s)\n", epoch, timeSource == 1 ? "rtc" : "hub");
-        broadcastTime();
+        // The gateway's own RTC / internet time win; the hub's clock is the fallback.
+        clockFromHub((uint32_t)epoch, cmd.indexOf(":rtc") > 0);
       }
+    }
+  } else if (lead == 'L') {
+    String cmd = tcpClient.readStringUntil('\n');
+    if (cmd.startsWith("LOGACK:")) {
+      dataLogAck((uint32_t)strtoul(cmd.c_str() + 7, nullptr, 10));
+    } else if (cmd.startsWith("LOGCFG:")) {
+      // LOGCFG:<store 0 flash|1 sd>:<maxKB>:<sdCS>:<rtcSDA>:<rtcSCL>
+      int v[5] = {0, 256, 5, 21, 22};
+      int from = 7;
+      for (int i = 0; i < 5 && from <= (int)cmd.length(); i++) {
+        int c = cmd.indexOf(':', from);
+        String part = c < 0 ? cmd.substring(from) : cmd.substring(from, c);
+        if (part.length()) v[i] = part.toInt();
+        if (c < 0) break;
+        from = c + 1;
+      }
+      int oldSda = prefs.getInt("rtc_sda", 21), oldScl = prefs.getInt("rtc_scl", 22);
+      int oldStore = prefs.getInt("log_store", 0), oldCs = prefs.getInt("sd_cs", 5);
+      dataLogConfigure(v[0], v[1], v[2]);
+      prefs.putInt("rtc_sda", v[3]);
+      prefs.putInt("rtc_scl", v[4]);
+      Serial.printf("Log settings from hub: store=%d max=%dKB sdcs=%d rtc=%d/%d\n", v[0], v[1], v[2], v[3], v[4]);
+      if (v[3] != oldSda || v[4] != oldScl) clockConfigure(v[3], v[4]);
+      if (v[0] != oldStore || v[2] != oldCs) pendingReboot = true;  // remount the storage
+    } else {
+      Serial.printf("Unknown TCP data (L): %s\n", cmd.c_str());
     }
   } else if (lead == 'P') {
     String cmd = tcpClient.readStringUntil('\n');
