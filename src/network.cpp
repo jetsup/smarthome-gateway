@@ -63,6 +63,8 @@ bool tcpConnect() {
     uint64_t mac = ESP.getEfuseMac();
     uint32_t announceId = (uint32_t)(mac & 0xFFFFFFFF);
     tcpClient.printf("GWID:%u\n", announceId);
+    tcpClient.printf("GWMAC:%02X:%02X:%02X:%02X:%02X:%02X\n", (uint8_t)mac, (uint8_t)(mac >> 8),
+                     (uint8_t)(mac >> 16), (uint8_t)(mac >> 24), (uint8_t)(mac >> 32), (uint8_t)(mac >> 40));
     syncWifiCredentials();
     return true;
   }

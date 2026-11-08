@@ -151,6 +151,10 @@ static void sendReliable(const uint8_t* data, size_t len, int times = 4, int gap
   }
 }
 
+// Pairing code sent by the hub just before a BB: line (see PCODE: above).
+static uint32_t pendingCodeDev = 0;
+static char pendingCode[9] = {0};
+
 void handleDownlink() {
   if (!tcpClient.available()) return;
   int avail = tcpClient.available();
@@ -254,7 +258,15 @@ void handleDownlink() {
   } else if (lead == 'P') {
     String cmd = tcpClient.readStringUntil('\n');
     // PAIR:CODE:XXXXXX — pairing code for HMI, log it for serial display
-    if (cmd.startsWith("PAIR:CODE:")) {
+    if (cmd.startsWith("PCODE:")) {
+      // PCODE:<deviceId>:<CODE> — the pairing code for the next BB: to that node
+      int c = cmd.indexOf(':', 6);
+      if (c > 0) {
+        pendingCodeDev = parseUint32(cmd.substring(6, c));
+        memset(pendingCode, 0, sizeof(pendingCode));
+        cmd.substring(c + 1).toCharArray(pendingCode, sizeof(pendingCode));
+      }
+    } else if (cmd.startsWith("PAIR:CODE:")) {
       String code = cmd.substring(10);
       Serial.printf("HMI PAIRING CODE: %s\n", code.c_str());
       Serial.println("Enter this code on the HMI to complete pairing.");
@@ -365,6 +377,9 @@ void handleBBCommand(const String& cmd) {
   nodeNameStr.toCharArray(provMsg.nodeName, sizeof(provMsg.nodeName) - 1);
   provMsg.capCount = capCount;
   memcpy(provMsg.caps, caps, sizeof(caps));
+  memset(provMsg.code, 0, sizeof(provMsg.code));
+  if (pendingCodeDev == deviceId) memcpy(provMsg.code, pendingCode, sizeof(provMsg.code) - 1);
+  pendingCodeDev = 0;
 
   uint8_t calc = 0;
   for (int i = 0; i < (int)sizeof(ESPNowProvisionMessage) - 1; i++) {

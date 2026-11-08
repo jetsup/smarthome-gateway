@@ -40,6 +40,7 @@ struct __attribute__((__packed__)) ESPNowProvisionMessage {
   char nodeName[17];       // 16 chars + null
   uint8_t capCount;
   CapabilitySlot caps[CAP_MAX_COUNT];
+  char code[9];            // node pairing code (8 chars + null), see README
   uint8_t checksum;
 };
 
